@@ -1,0 +1,82 @@
+{
+  "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02",
+  "generatedAt": "2026-04-02T05:22:33.378Z",
+  "products": [
+    {
+      "id": "8c695e05-f332-4a9b-9b7e-916042e8ff7e",
+      "name": "Lenovo Laptop",
+      "costPrice": 0,
+      "sellingPrice": 0,
+      "price": 500000,
+      "stock": 8,
+      "lowStockThreshold": 10,
+      "barcode": null,
+      "createdAt": "2026-03-28T04:28:46.767Z",
+      "updatedAt": "2026-03-28T04:35:57.663Z",
+      "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02",
+      "storeId": null
+    },
+    {
+      "id": "b6a3e6ee-5eed-4830-9a88-16f5effd1ee9",
+      "name": "HP Laptops",
+      "costPrice": 450000,
+      "sellingPrice": 500000,
+      "price": 500000,
+      "stock": 20,
+      "lowStockThreshold": 10,
+      "barcode": null,
+      "createdAt": "2026-04-01T13:59:49.354Z",
+      "updatedAt": "2026-04-01T13:59:49.354Z",
+      "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02",
+      "storeId": null
+    }
+  ],
+  "customers": [
+    {
+      "id": "1a18896e-441f-4139-bb32-fb53b813caad",
+      "name": "Reign",
+      "email": "example@email.com",
+      "phone": "0902000000",
+      "createdAt": "2026-04-01T14:03:19.281Z",
+      "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "f5723f12-785d-4f22-9ba5-58081ec10975",
+      "total": 1000000,
+      "paymentMethod": "CASH",
+      "createdAt": "2026-03-28T04:35:57.656Z",
+      "syncedAt": "2026-03-28T04:35:57.656Z",
+      "syncStatus": "SYNCED",
+      "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02",
+      "userId": "d1640010-edfe-43b1-9b80-fc18a020af79",
+      "storeId": null,
+      "customerId": null,
+      "items": [
+        {
+          "id": "c9c9fc34-9b23-4b1b-85ee-ea4441575f36",
+          "quantity": 2,
+          "price": 500000,
+          "transactionId": "f5723f12-785d-4f22-9ba5-58081ec10975",
+          "productId": "8c695e05-f332-4a9b-9b7e-916042e8ff7e"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "id": "c76d2c47-bc05-4416-8a19-3832cf9df601",
+    "currencyCode": "NGN",
+    "currencySymbol": "₦",
+    "taxEnabled": false,
+    "taxRate": 0,
+    "businessName": "VIIX Solutions",
+    "businessEmail": "olaolugidan@gmail.com",
+    "businessPhone": "",
+    "logoUrl": null,
+    "receiptLayout": "STANDARD",
+    "createdAt": "2026-04-01T13:02:02.188Z",
+    "updatedAt": "2026-04-01T13:11:32.186Z",
+    "businessId": "cfca96d2-6aa6-4b58-9577-6937d4c6ea02"
+  }
+}

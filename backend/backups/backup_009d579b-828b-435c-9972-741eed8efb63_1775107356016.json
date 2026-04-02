@@ -1,0 +1,45 @@
+{
+  "businessId": "009d579b-828b-435c-9972-741eed8efb63",
+  "generatedAt": "2026-04-02T05:22:36.016Z",
+  "products": [
+    {
+      "id": "caece373-4127-4603-806e-5606ce089d6b",
+      "name": "Profit SKU",
+      "costPrice": 60,
+      "sellingPrice": 120,
+      "price": 120,
+      "stock": 8,
+      "lowStockThreshold": 10,
+      "barcode": null,
+      "createdAt": "2026-04-01T13:19:33.045Z",
+      "updatedAt": "2026-04-01T13:19:33.108Z",
+      "businessId": "009d579b-828b-435c-9972-741eed8efb63",
+      "storeId": null
+    }
+  ],
+  "customers": [],
+  "transactions": [
+    {
+      "id": "c76482ec-8a2d-4aa7-a885-86a75eb99963",
+      "total": 240,
+      "paymentMethod": "CASH",
+      "createdAt": "2026-04-01T13:19:33.092Z",
+      "syncedAt": "2026-04-01T13:19:33.092Z",
+      "syncStatus": "SYNCED",
+      "businessId": "009d579b-828b-435c-9972-741eed8efb63",
+      "userId": "5f0ec8ca-da35-48b2-af60-0401fa8d7e39",
+      "storeId": null,
+      "customerId": null,
+      "items": [
+        {
+          "id": "4b80e922-e657-4415-a3a1-6c1f750c50cc",
+          "quantity": 2,
+          "price": 120,
+          "transactionId": "c76482ec-8a2d-4aa7-a885-86a75eb99963",
+          "productId": "caece373-4127-4603-806e-5606ce089d6b"
+        }
+      ]
+    }
+  ],
+  "settings": null
+}

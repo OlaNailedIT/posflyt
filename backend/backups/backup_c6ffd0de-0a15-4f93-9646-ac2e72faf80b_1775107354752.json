@@ -1,0 +1,59 @@
+{
+  "businessId": "c6ffd0de-0a15-4f93-9646-ac2e72faf80b",
+  "generatedAt": "2026-04-02T05:22:34.752Z",
+  "products": [
+    {
+      "id": "dc30dff7-0237-40ef-8921-f4deb44b7959",
+      "name": "Sales Feed SKU",
+      "costPrice": 0,
+      "sellingPrice": 0,
+      "price": 1500,
+      "stock": 9,
+      "lowStockThreshold": 10,
+      "barcode": null,
+      "createdAt": "2026-04-01T13:10:27.639Z",
+      "updatedAt": "2026-04-01T13:10:27.684Z",
+      "businessId": "c6ffd0de-0a15-4f93-9646-ac2e72faf80b",
+      "storeId": null
+    }
+  ],
+  "customers": [],
+  "transactions": [
+    {
+      "id": "79917064-46fe-4a7b-aa5e-94c060e852b3",
+      "total": 1612.5,
+      "paymentMethod": "CASH",
+      "createdAt": "2026-04-01T13:10:27.668Z",
+      "syncedAt": "2026-04-01T13:10:27.668Z",
+      "syncStatus": "SYNCED",
+      "businessId": "c6ffd0de-0a15-4f93-9646-ac2e72faf80b",
+      "userId": "c7acd433-f4b9-4759-b7c3-7e8e2139d8d0",
+      "storeId": null,
+      "customerId": null,
+      "items": [
+        {
+          "id": "2e4022b0-e930-4383-bf71-18ddaad05e12",
+          "quantity": 1,
+          "price": 1500,
+          "transactionId": "79917064-46fe-4a7b-aa5e-94c060e852b3",
+          "productId": "dc30dff7-0237-40ef-8921-f4deb44b7959"
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "id": "87a9f29b-34dc-4b2b-9277-217b8db00a05",
+    "currencyCode": "NGN",
+    "currencySymbol": "₦",
+    "taxEnabled": true,
+    "taxRate": 7.5,
+    "businessName": "Settings Test Biz Updated",
+    "businessEmail": "owner@settings-test.biz",
+    "businessPhone": "+234000111222",
+    "logoUrl": null,
+    "receiptLayout": "STANDARD",
+    "createdAt": "2026-04-01T13:10:27.595Z",
+    "updatedAt": "2026-04-01T13:10:27.616Z",
+    "businessId": "c6ffd0de-0a15-4f93-9646-ac2e72faf80b"
+  }
+}

@@ -1,0 +1,2 @@
+window,sync_success_rate,duplicate_transaction_rate,stock_mismatch_count,api_5xx_count,avg_sync_retry_resolution_time_ms,notes
+24h,,,,,,Initial baseline capture before pilot

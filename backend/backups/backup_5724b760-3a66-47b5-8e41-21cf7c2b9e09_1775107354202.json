@@ -1,0 +1,45 @@
+{
+  "businessId": "5724b760-3a66-47b5-8e41-21cf7c2b9e09",
+  "generatedAt": "2026-04-02T05:22:34.201Z",
+  "products": [
+    {
+      "id": "b79f9e8c-1ef3-41b7-ae2e-68111257d017",
+      "name": "Test SKU",
+      "costPrice": 0,
+      "sellingPrice": 0,
+      "price": 10,
+      "stock": 4,
+      "lowStockThreshold": 10,
+      "barcode": null,
+      "createdAt": "2026-04-01T12:59:44.654Z",
+      "updatedAt": "2026-04-01T12:59:44.685Z",
+      "businessId": "5724b760-3a66-47b5-8e41-21cf7c2b9e09",
+      "storeId": null
+    }
+  ],
+  "customers": [],
+  "transactions": [
+    {
+      "id": "a4154573-4fea-4314-947c-2c4e44727c80",
+      "total": 10,
+      "paymentMethod": "CASH",
+      "createdAt": "2026-04-01T12:59:44.661Z",
+      "syncedAt": "2026-04-01T12:59:44.661Z",
+      "syncStatus": "SYNCED",
+      "businessId": "5724b760-3a66-47b5-8e41-21cf7c2b9e09",
+      "userId": "ca81928d-aee9-4a1c-9e1f-925adb5ec796",
+      "storeId": null,
+      "customerId": null,
+      "items": [
+        {
+          "id": "3324b1b5-1c78-4999-97b5-be4b4a071598",
+          "quantity": 1,
+          "price": 10,
+          "transactionId": "a4154573-4fea-4314-947c-2c4e44727c80",
+          "productId": "b79f9e8c-1ef3-41b7-ae2e-68111257d017"
+        }
+      ]
+    }
+  ],
+  "settings": null
+}

@@ -1,0 +1,54 @@
+{
+  "businessId": "8160c007-fb34-4b59-8c57-a7bd8f587856",
+  "generatedAt": "2026-04-02T05:22:35.709Z",
+  "products": [
+    {
+      "id": "d23bce81-2c1d-4847-8e47-3ddcc2ecbf01",
+      "name": "CRM SKU",
+      "costPrice": 0,
+      "sellingPrice": 100,
+      "price": 100,
+      "stock": 4,
+      "lowStockThreshold": 8,
+      "barcode": null,
+      "createdAt": "2026-04-01T13:19:32.960Z",
+      "updatedAt": "2026-04-01T13:19:33.050Z",
+      "businessId": "8160c007-fb34-4b59-8c57-a7bd8f587856",
+      "storeId": null
+    }
+  ],
+  "customers": [
+    {
+      "id": "57ad0295-fd64-469a-b46e-1591367e8d66",
+      "name": "Jane Buyer",
+      "email": "jane@example.com",
+      "phone": "08000000000",
+      "createdAt": "2026-04-01T13:19:32.991Z",
+      "businessId": "8160c007-fb34-4b59-8c57-a7bd8f587856"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "64baf1c4-59ef-4558-b497-aef39ef6fcbe",
+      "total": 100,
+      "paymentMethod": "CASH",
+      "createdAt": "2026-04-01T13:19:33.038Z",
+      "syncedAt": "2026-04-01T13:19:33.038Z",
+      "syncStatus": "SYNCED",
+      "businessId": "8160c007-fb34-4b59-8c57-a7bd8f587856",
+      "userId": "3b76d22a-ec34-4633-a855-5dda09a35690",
+      "storeId": null,
+      "customerId": "57ad0295-fd64-469a-b46e-1591367e8d66",
+      "items": [
+        {
+          "id": "173959c4-7268-4335-a112-dce23609a627",
+          "quantity": 1,
+          "price": 100,
+          "transactionId": "64baf1c4-59ef-4558-b497-aef39ef6fcbe",
+          "productId": "d23bce81-2c1d-4847-8e47-3ddcc2ecbf01"
+        }
+      ]
+    }
+  ],
+  "settings": null
+}

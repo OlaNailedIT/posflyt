@@ -1,0 +1,89 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy or rollback"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - rollback
+      target_release:
+        description: "Release tag for rollback (required when action=rollback)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    name: Promote to Production
+    if: ${{ github.event.inputs.action == 'deploy' }}
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release tag (vYYYY.MM.DD-N)
+        id: release
+        run: |
+          TAG="v$(date -u +'%Y.%m.%d')-${{ github.run_number }}"
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Promote known-good staging artifact/image
+        env:
+          PRODUCTION_DEPLOY_HOOK_URL: ${{ secrets.PRODUCTION_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$PRODUCTION_DEPLOY_HOOK_URL" ]; then
+            echo "PRODUCTION_DEPLOY_HOOK_URL is required."
+            exit 1
+          fi
+          curl -fsS -X POST "$PRODUCTION_DEPLOY_HOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"release\":\"${{ steps.release.outputs.release_tag }}\",\"source\":\"staging\"}"
+
+      - name: Verify production health checks
+        env:
+          PRODUCTION_API_HEALTH_URL: ${{ secrets.PRODUCTION_API_HEALTH_URL }}
+          PRODUCTION_SYSTEM_HEALTH_URL: ${{ secrets.PRODUCTION_SYSTEM_HEALTH_URL }}
+        run: |
+          if [ -z "$PRODUCTION_API_HEALTH_URL" ] || [ -z "$PRODUCTION_SYSTEM_HEALTH_URL" ]; then
+            echo "Production health URLs are required."
+            exit 1
+          fi
+          curl -fsS "$PRODUCTION_API_HEALTH_URL"
+          curl -fsS "$PRODUCTION_SYSTEM_HEALTH_URL"
+
+  rollback:
+    name: Rollback Production
+    if: ${{ github.event.inputs.action == 'rollback' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate rollback input
+        run: |
+          if [ -z "${{ github.event.inputs.target_release }}" ]; then
+            echo "target_release is required for rollback."
+            exit 1
+          fi
+
+      - name: Trigger rollback hook
+        env:
+          PRODUCTION_ROLLBACK_HOOK_URL: ${{ secrets.PRODUCTION_ROLLBACK_HOOK_URL }}
+        run: |
+          if [ -z "$PRODUCTION_ROLLBACK_HOOK_URL" ]; then
+            echo "PRODUCTION_ROLLBACK_HOOK_URL is required."
+            exit 1
+          fi
+          curl -fsS -X POST "$PRODUCTION_ROLLBACK_HOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"release\":\"${{ github.event.inputs.target_release }}\"}"

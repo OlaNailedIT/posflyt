@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POSflyt — Commerce Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0a0a0f;--ink2:#13131a;--ink3:#1e1e2e;--surface:#111118;--muted:#3a3a52;--border:rgba(255,255,255,0.06);--text:#e8e8f0;--dim:#7878a0;--accent:#00e5ff;--accent2:#7c5cfc;--accent3:#ff5e84;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{font-family:'DM Sans',sans-serif;background:var(--ink);color:var(--text);overflow-x:hidden;line-height:1.6;}
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");background-size:200px;pointer-events:none;z-index:9999;opacity:.4;}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:1.2rem 4rem;backdrop-filter:blur(20px);background:rgba(10,10,15,0.75);border-bottom:1px solid var(–border);}
+.logo{font-family:‘Syne’,sans-serif;font-weight:800;font-size:1.45rem;letter-spacing:-.04em;display:flex;align-items:center;gap:.5rem;}
+.logo-icon{width:30px;height:30px;background:linear-gradient(135deg,var(–accent),var(–accent2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.85rem;}
+.logo span{color:var(–accent);}
+nav ul{list-style:none;display:flex;gap:2.2rem;align-items:center;}
+nav a{text-decoration:none;color:var(–dim);font-size:.88rem;font-weight:500;transition:color .2s;}
+nav a:hover{color:var(–text);}
+.nav-cta{background:var(–accent);color:var(–ink)!important;padding:.5rem 1.3rem;border-radius:6px;font-weight:600!important;}
+.nav-cta:hover{opacity:.85;}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8rem 2rem 6rem;position:relative;overflow:hidden;}
+.hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(0,229,255,.12) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(124,92,252,.10) 0%,transparent 60%),radial-gradient(ellipse 40% 30% at 10% 70%,rgba(255,94,132,.07) 0%,transparent 60%);}
+.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 60% at 50% 50%,black 0%,transparent 100%);}
+.badge{display:inline-flex;align-items:center;gap:.5rem;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.2);color:var(–accent);font-size:.75rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:.42rem 1rem;border-radius:100px;margin-bottom:2rem;animation:fadeUp .8s ease both;}
+.badge-dot{width:6px;height:6px;background:var(–accent);border-radius:50%;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+h1{font-family:‘Syne’,sans-serif;font-size:clamp(3rem,7vw,6.5rem);font-weight:800;line-height:1;letter-spacing:-.04em;margin-bottom:1.5rem;animation:fadeUp .8s .1s ease both;}
+h1 em{font-style:normal;background:linear-gradient(135deg,var(–accent) 0%,var(–accent2) 60%,var(–accent3) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.hero-sub{font-size:clamp(1rem,2vw,1.2rem);color:var(–dim);max-width:580px;font-weight:300;line-height:1.75;margin-bottom:2.8rem;animation:fadeUp .8s .2s ease both;}
+.hero-actions{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;animation:fadeUp .8s .3s ease both;}
+.btn-primary{background:var(–accent);color:var(–ink);font-family:‘DM Sans’,sans-serif;font-weight:600;font-size:.92rem;padding:.85rem 2rem;border-radius:8px;border:none;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.5rem;transition:transform .2s,box-shadow .2s;box-shadow:0 0 30px rgba(0,229,255,.3);}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 0 50px rgba(0,229,255,.45);}
+.btn-secondary{background:transparent;color:var(–text);font-family:‘DM Sans’,sans-serif;font-weight:500;font-size:.92rem;padding:.85rem 2rem;border-radius:8px;border:1px solid var(–border);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.5rem;transition:border-color .2s,background .2s;}
+.btn-secondary:hover{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.04);}
+
+/* STATS */
+.stats-bar{display:flex;justify-content:center;gap:4rem;padding:3rem 4rem;border-top:1px solid var(–border);border-bottom:1px solid var(–border);background:rgba(255,255,255,.015);flex-wrap:wrap;}
+.stat-num{font-family:‘Syne’,sans-serif;font-size:2.1rem;font-weight:800;letter-spacing:-.04em;background:linear-gradient(135deg,var(–text),var(–accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.stat-label{font-size:.8rem;color:var(–dim);font-weight:400;margin-top:.15rem;}
+
+/* SECTIONS */
+section{padding:7rem 4rem;max-width:1280px;margin:0 auto;}
+.section-tag{font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(–accent);margin-bottom:.9rem;}
+.section-title{font-family:‘Syne’,sans-serif;font-size:clamp(2rem,4vw,3rem);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:1.1rem;}
+.section-desc{color:var(–dim);font-size:1rem;max-width:540px;line-height:1.78;font-weight:300;}
+.center-header{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:4rem;}
+.center-header .section-desc{max-width:560px;}
+
+/* FEATURES GRID */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5px;background:var(–border);border:1px solid var(–border);border-radius:16px;overflow:hidden;}
+.feature-card{background:var(–ink2);padding:2.2rem;position:relative;overflow:hidden;transition:background .3s;cursor:default;}
+.feature-card:hover{background:var(–ink3);}
+.feature-card::before{content:’’;position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(–accent),transparent);opacity:0;transition:opacity .3s;}
+.feature-card:hover::before{opacity:1;}
+.feature-icon{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin-bottom:1.3rem;}
+.ic{background:rgba(0,229,255,.09);}.ip{background:rgba(124,92,252,.09);}.ig{background:rgba(0,255,163,.09);}.ipk{background:rgba(255,94,132,.09);}.io{background:rgba(255,160,72,.09);}.iy{background:rgba(255,220,50,.09);}.ib{background:rgba(64,160,255,.09);}.ir{background:rgba(255,80,80,.09);}
+.feature-title{font-family:‘Syne’,sans-serif;font-size:1.05rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.65rem;}
+.feature-desc{font-size:.85rem;color:var(–dim);line-height:1.7;font-weight:300;}
+.pills{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.1rem;}
+.pill{font-size:.7rem;font-weight:600;padding:.22rem .65rem;border-radius:100px;border:1px solid;letter-spacing:.02em;}
+.pc{color:var(–accent);border-color:rgba(0,229,255,.2);background:rgba(0,229,255,.05);}
+.pp{color:#a78bfa;border-color:rgba(124,92,252,.2);background:rgba(124,92,252,.05);}
+.ppk{color:#fb7185;border-color:rgba(255,94,132,.2);background:rgba(255,94,132,.05);}
+.pg{color:#34d399;border-color:rgba(0,255,163,.2);background:rgba(0,255,163,.05);}
+
+/* DASHBOARD */
+.dashboard-section{padding:0 4rem 7rem;max-width:1280px;margin:0 auto;}
+.dash-wrap{background:var(–ink2);border:1px solid var(–border);border-radius:20px;overflow:hidden;position:relative;}
+.dash-wrap::before{content:’’;position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,229,255,.025) 0%,transparent 50%,rgba(124,92,252,.025) 100%);pointer-events:none;}
+.dash-topbar{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.4rem;border-bottom:1px solid var(–border);background:rgba(255,255,255,.02);}
+.dots{display:flex;gap:6px;}
+.dot{width:10px;height:10px;border-radius:50%;}
+.dr{background:#ff5f57}.dy{background:#ffbd2e}.dg{background:#28c840}
+.dash-title-bar{font-family:‘Syne’,sans-serif;font-size:.75rem;font-weight:600;color:var(–dim);letter-spacing:.06em;text-transform:uppercase;}
+.dash-meta{font-size:.72rem;color:var(–muted);}
+.dash-body{padding:1.5rem;display:grid;grid-template-columns:200px 1fr;gap:1.2rem;min-height:420px;}
+.dash-sidebar{display:flex;flex-direction:column;gap:.2rem;}
+.sidebar-brand{font-family:‘Syne’,sans-serif;font-weight:800;font-size:1rem;letter-spacing:-.04em;color:var(–accent);padding:0 .7rem .9rem;border-bottom:1px solid var(–border);margin-bottom:.5rem;}
+.si{display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:7px;font-size:.8rem;color:var(–dim);cursor:default;transition:background .2s,color .2s;}
+.si:hover,.si.active{background:rgba(0,229,255,.07);color:var(–text);}
+.si.active{color:var(–accent);}
+.dash-main{display:flex;flex-direction:column;gap:1rem;}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;}
+.kpi{background:var(–ink3);border:1px solid var(–border);border-radius:10px;padding:.9rem;}
+.kpi-label{font-size:.68rem;color:var(–dim);font-weight:500;letter-spacing:.04em;text-transform:uppercase;margin-bottom:.3rem;}
+.kpi-val{font-family:‘Syne’,sans-serif;font-size:1.4rem;font-weight:800;letter-spacing:-.04em;}
+.kpi-ch{font-size:.7rem;margin-top:.2rem;}
+.up{color:#34d399}.dn{color:#fb7185}
+.chart-row{display:grid;grid-template-columns:3fr 2fr;gap:.8rem;}
+.chart-box{background:var(–ink3);border:1px solid var(–border);border-radius:10px;padding:1rem;}
+.chart-lbl{font-size:.7rem;font-weight:600;color:var(–dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.8rem;}
+.bar-chart{display:flex;align-items:flex-end;gap:5px;height:70px;}
+.bar{flex:1;border-radius:3px 3px 0 0;}
+.donut-wrap{display:flex;align-items:center;justify-content:center;gap:1rem;}
+.donut-legend{display:flex;flex-direction:column;gap:.4rem;}
+.leg-item{display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(–dim);}
+.leg-dot{width:8px;height:8px;border-radius:50%;}
+.recent-row{background:var(–ink3);border:1px solid var(–border);border-radius:10px;padding:1rem;}
+.recent-lbl{font-size:.7rem;font-weight:600;color:var(–dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.75rem;}
+.txn-list{display:flex;flex-direction:column;gap:.5rem;}
+.txn{display:flex;align-items:center;justify-content:space-between;font-size:.78rem;padding:.4rem .6rem;border-radius:6px;background:rgba(255,255,255,.025);}
+.txn-left{display:flex;align-items:center;gap:.6rem;}
+.txn-avatar{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;}
+.txn-name{font-weight:500;}
+.txn-time{color:var(–dim);font-size:.7rem;}
+.txn-amount{font-family:‘Syne’,sans-serif;font-weight:700;font-size:.88rem;}
+
+/* SPLIT */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:5rem;align-items:start;padding:7rem 4rem;max-width:1280px;margin:0 auto;}
+.imp-list{display:flex;flex-direction:column;gap:1rem;margin-top:2rem;}
+.imp{display:flex;gap:.9rem;align-items:flex-start;padding:1.1rem;background:var(–ink2);border:1px solid var(–border);border-radius:11px;transition:border-color .2s,background .2s;}
+.imp:hover{border-color:rgba(0,229,255,.15);background:var(–ink3);}
+.imp-icon{width:36px;height:36px;min-width:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:.95rem;background:rgba(0,229,255,.08);}
+.imp h4{font-family:‘Syne’,sans-serif;font-size:.9rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.2rem;}
+.imp p{font-size:.8rem;color:var(–dim);line-height:1.6;font-weight:300;}
+
+/* FUTURE */
+.future-section{padding:0 4rem 7rem;max-width:1280px;margin:0 auto;}
+.future-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.1rem;margin-top:4rem;}
+.future-card{background:var(–ink2);border:1px solid var(–border);border-radius:14px;padding:1.8rem;position:relative;overflow:hidden;transition:transform .3s,border-color .3s;}
+.future-card:hover{transform:translateY(-5px);border-color:rgba(124,92,252,.22);}
+.future-card::after{content:’’;position:absolute;bottom:0;left:0;right:0;height:50px;background:linear-gradient(to top,rgba(124,92,252,.05),transparent);pointer-events:none;}
+.future-num{font-family:‘Syne’,sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.12em;color:var(–accent2);text-transform:uppercase;margin-bottom:.9rem;}
+.future-title{font-family:‘Syne’,sans-serif;font-size:.98rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.6rem;}
+.future-desc{font-size:.8rem;color:var(–dim);line-height:1.65;font-weight:300;}
+
+/* PRICING */
+.pricing-section{padding:7rem 4rem;max-width:1280px;margin:0 auto;text-align:center;}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.3rem;margin-top:3.5rem;text-align:left;}
+.pricing-card{background:var(–ink2);border:1px solid var(–border);border-radius:16px;padding:2.2rem;position:relative;transition:transform .3s;}
+.pricing-card:hover{transform:translateY(-5px);}
+.pricing-card.feat{border-color:var(–accent);background:linear-gradient(135deg,rgba(0,229,255,.04),rgba(124,92,252,.04));}
+.feat-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(–accent);color:var(–ink);font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:.28rem .9rem;border-radius:100px;}
+.plan-name{font-family:‘Syne’,sans-serif;font-size:.88rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(–dim);margin-bottom:.9rem;}
+.plan-price{font-family:‘Syne’,sans-serif;font-size:2.8rem;font-weight:800;letter-spacing:-.05em;margin-bottom:.2rem;}
+.plan-price sup{font-size:1.1rem;vertical-align:super;}
+.plan-period{font-size:.8rem;color:var(–dim);margin-bottom:1.8rem;}
+.plan-features{list-style:none;display:flex;flex-direction:column;gap:.65rem;margin-bottom:2.2rem;}
+.plan-features li{display:flex;align-items:center;gap:.55rem;font-size:.85rem;color:var(–dim);}
+.plan-features li::before{content:‘✓’;color:var(–accent);font-weight:700;font-size:.78rem;}
+.btn-plan{display:block;width:100%;text-align:center;padding:.8rem;border-radius:7px;font-family:‘DM Sans’,sans-serif;font-weight:600;font-size:.88rem;cursor:pointer;text-decoration:none;border:1px solid var(–border);color:var(–text);background:transparent;transition:background .2s,border-color .2s;}
+.btn-plan:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.12);}
+.btn-plan.primary{background:var(–accent);color:var(–ink);border-color:var(–accent);}
+.btn-plan.primary:hover{opacity:.88;}
+
+/* CTA */
+.cta-section{padding:0 4rem 7rem;max-width:1280px;margin:0 auto;}
+.cta-box{background:linear-gradient(135deg,rgba(0,229,255,.06),rgba(124,92,252,.08),rgba(255,94,132,.04));border:1px solid rgba(0,229,255,.1);border-radius:22px;padding:5rem;text-align:center;position:relative;overflow:hidden;}
+.cta-box::before{content:’’;position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse 60% 40% at 50% 50%,rgba(0,229,255,.04),transparent 70%);animation:rotate 20s linear infinite;pointer-events:none;}
+@keyframes rotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.cta-box h2{font-family:‘Syne’,sans-serif;font-size:clamp(2rem,4vw,3rem);font-weight:800;letter-spacing:-.04em;margin-bottom:.9rem;}
+.cta-box p{color:var(–dim);font-size:1rem;max-width:480px;margin:0 auto 2.5rem;font-weight:300;}
+
+/* FOOTER */
+footer{border-top:1px solid var(–border);padding:2.5rem 4rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;background:rgba(255,255,255,.01);}
+.footer-logo{font-family:‘Syne’,sans-serif;font-weight:800;font-size:1.2rem;letter-spacing:-.04em;}
+.footer-logo span{color:var(–accent);}
+footer p{font-size:.8rem;color:var(–dim);}
+.footer-links{display:flex;gap:2rem;list-style:none;}
+.footer-links a{font-size:.8rem;color:var(–dim);text-decoration:none;transition:color .2s;}
+.footer-links a:hover{color:var(–text);}
+
+/* ANIM */
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{opacity:0;transform:translateY(20px);transition:opacity .65s ease,transform .65s ease;}
+.fade-up.visible{opacity:1;transform:none;}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(–ink)}::-webkit-scrollbar-thumb{background:var(–muted);border-radius:3px}
+</style>
+
+</head>
+<body>
+
+<!-- NAV -->
+
+<nav>
+  <div class="logo"><div class="logo-icon">⚡</div>POS<span>flyt</span></div>
+  <ul>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#dashboard">Dashboard</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#pricing">Pricing</a></li>
+    <li><a href="#pricing" class="nav-cta">Get Started</a></li>
+  </ul>
+</nav>
+
+<!-- HERO -->
+
+<div class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
+  <div class="badge"><div class="badge-dot"></div>Now with AI-Powered Insights</div>
+  <h1>Commerce runs<br><em>faster with flyt</em></h1>
+  <p class="hero-sub">The all-in-one ERP and POS platform built for modern retail. Real-time inventory, omnichannel sales, and intelligent analytics — unified in one fluid system.</p>
+  <div class="hero-actions">
+    <a href="#pricing" class="btn-primary">Start Free Trial →</a>
+    <a href="#dashboard" class="btn-secondary">▶ See it live</a>
+  </div>
+</div>
+
+<!-- STATS -->
+
+<div class="stats-bar">
+  <div class="stat"><div class="stat-num">12,000+</div><div class="stat-label">Businesses powered</div></div>
+  <div class="stat"><div class="stat-num">99.97%</div><div class="stat-label">Platform uptime</div></div>
+  <div class="stat"><div class="stat-num">$4.2B</div><div class="stat-label">Transactions processed</div></div>
+  <div class="stat"><div class="stat-num">42ms</div><div class="stat-label">Avg transaction speed</div></div>
+  <div class="stat"><div class="stat-num">160+</div><div class="stat-label">Countries supported</div></div>
+</div>
+
+<!-- FEATURES -->
+
+<section id="features">
+  <div class="center-header fade-up">
+    <div class="section-tag">Core Platform</div>
+    <h2 class="section-title">Every tool your<br>business needs</h2>
+    <p class="section-desc">Eight enterprise-grade modules bundled into one seamless platform — no duct tape, no tab-switching, no surprises.</p>
+  </div>
+  <div class="features-grid fade-up">
+    <div class="feature-card">
+      <div class="feature-icon ic">🖥️</div>
+      <div class="feature-title">Point of Sale</div>
+      <p class="feature-desc">Lightning-fast billing with barcode scanning, touchscreen support, and full offline functionality. Accept any payment, anywhere, anytime.</p>
+      <div class="pills"><span class="pill pc">Offline Mode</span><span class="pill pc">Multi-Payment</span><span class="pill pc">Promotions</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon ip">📦</div>
+      <div class="feature-title">Inventory Management</div>
+      <p class="feature-desc">Real-time stock visibility across all locations and warehouses. Automated reorder alerts, batch tracking, and purchase integration.</p>
+      <div class="pills"><span class="pill pp">Auto Reorder</span><span class="pill pp">Multi-Location</span><span class="pill pp">Serial Tracking</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon ig">🛒</div>
+      <div class="feature-title">Omnichannel & eCommerce</div>
+      <p class="feature-desc">Sync online and offline sales effortlessly. Centralized catalog management with unified pricing across physical stores and digital storefronts.</p>
+      <div class="pills"><span class="pill pg">eCommerce Sync</span><span class="pill pg">Order Fulfillment</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon ipk">💎</div>
+      <div class="feature-title">CRM & Loyalty</div>
+      <p class="feature-desc">Build lasting relationships with deep purchase history insights. Drive repeat business through loyalty points, coupons, and targeted campaigns.</p>
+      <div class="pills"><span class="pill ppk">Loyalty Points</span><span class="pill ppk">Membership</span><span class="pill ppk">Marketing</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon io">🔗</div>
+      <div class="feature-title">Supply Chain & Procurement</div>
+      <p class="feature-desc">Streamline purchasing from supplier to shelf. Manage POs, track shipments, and automate restock requests based on live inventory levels.</p>
+      <div class="pills"><span class="pill pc">Supplier Portal</span><span class="pill pc">Auto PO</span><span class="pill pc">Shipment Tracking</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon iy">💰</div>
+      <div class="feature-title">Accounting & Finance</div>
+      <p class="feature-desc">Automated tax calculation, invoice generation, and expense tracking. Integrated reconciliation with P&amp;L, balance sheets, and cash flow reports.</p>
+      <div class="pills"><span class="pill pp">Auto Tax</span><span class="pill pp">Invoicing</span><span class="pill pp">Reports</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon ib">🚐</div>
+      <div class="feature-title">Van Sales & Mobile POS</div>
+      <p class="feature-desc">Equip field teams to take orders and process payments on the go. Real-time sync prevents stock mismatches with route and territory mapping.</p>
+      <div class="pills"><span class="pill pc">Field Sales</span><span class="pill pc">Route Mapping</span><span class="pill pc">Live Sync</span></div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon ir">📊</div>
+      <div class="feature-title">Reporting & Business Intelligence</div>
+      <p class="feature-desc">Customizable dashboards with real-time sales, inventory, and financial insights. Advanced analytics with trend prediction for smarter decisions.</p>
+      <div class="pills"><span class="pill ppk">Live Dashboards</span><span class="pill ppk">Trend Analysis</span><span class="pill ppk">Custom KPIs</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- DASHBOARD PREVIEW -->
+
+<div class="dashboard-section" id="dashboard">
+  <div class="center-header fade-up">
+    <div class="section-tag">Live Dashboard</div>
+    <h2 class="section-title">Your command center</h2>
+    <p class="section-desc">A unified view of everything that matters — sales, stock, and revenue — updated in real time.</p>
+  </div>
+  <div class="dash-wrap fade-up">
+    <div class="dash-topbar">
+      <div class="dots"><div class="dot dr"></div><div class="dot dy"></div><div class="dot dg"></div></div>
+      <div class="dash-title-bar">POSflyt Dashboard — Main Store</div>
+      <div class="dash-meta">Live · Mar 27, 2026</div>
+    </div>
+    <div class="dash-body">
+      <!-- Sidebar -->
+      <div class="dash-sidebar">
+        <div class="sidebar-brand">POS<span style="color:var(--accent)">flyt</span></div>
+        <div class="si active"><span>📊</span> Overview</div>
+        <div class="si"><span>🖥️</span> Point of Sale</div>
+        <div class="si"><span>📦</span> Inventory</div>
+        <div class="si"><span>💎</span> CRM</div>
+        <div class="si"><span>🔗</span> Procurement</div>
+        <div class="si"><span>💰</span> Finance</div>
+        <div class="si"><span>📈</span> Analytics</div>
+        <div class="si"><span>⚙️</span> Settings</div>
+      </div>
+      <!-- Main -->
+      <div class="dash-main">
+        <div class="kpi-row">
+          <div class="kpi"><div class="kpi-label">Today's Revenue</div><div class="kpi-val">$18,420</div><div class="kpi-ch up">↑ 12.4% vs yesterday</div></div>
+          <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-val">342</div><div class="kpi-ch up">↑ 8.1%</div></div>
+          <div class="kpi"><div class="kpi-label">Low Stock Items</div><div class="kpi-val">7</div><div class="kpi-ch dn">↑ 3 new alerts</div></div>
+          <div class="kpi"><div class="kpi-label">Active Customers</div><div class="kpi-val">1,204</div><div class="kpi-ch up">↑ 5.3%</div></div>
+        </div>
+        <div class="chart-row">
+          <div class="chart-box">
+            <div class="chart-lbl">Hourly Sales — Today</div>
+            <div class="bar-chart" id="barChart"></div>
+          </div>
+          <div class="chart-box">
+            <div class="chart-lbl">Revenue Split</div>
+            <div class="donut-wrap">
+              <svg width="80" height="80" viewBox="0 0 80 80"><circle cx="40" cy="40" r="30" fill="none" stroke="var(--ink)" stroke-width="14"/><circle cx="40" cy="40" r="30" fill="none" stroke="var(--accent)" stroke-width="14" stroke-dasharray="113 75" stroke-dashoffset="25" transform="rotate(-90 40 40)"/><circle cx="40" cy="40" r="30" fill="none" stroke="var(--accent2)" stroke-width="14" stroke-dasharray="56 132" stroke-dashoffset="-88" transform="rotate(-90 40 40)"/><circle cx="40" cy="40" r="30" fill="none" stroke="var(--accent3)" stroke-width="14" stroke-dasharray="19 169" stroke-dashoffset="-144" transform="rotate(-90 40 40)"/></svg>
+              <div class="donut-legend">
+                <div class="leg-item"><div class="leg-dot" style="background:var(--accent)"></div>In-Store 60%</div>
+                <div class="leg-item"><div class="leg-dot" style="background:var(--accent2)"></div>Online 30%</div>
+                <div class="leg-item"><div class="leg-dot" style="background:var(--accent3)"></div>Van Sales 10%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="recent-row">
+          <div class="recent-lbl">Recent Transactions</div>
+          <div class="txn-list">
+            <div class="txn"><div class="txn-left"><div class="txn-avatar" style="background:rgba(0,229,255,.15);color:var(--accent)">SM</div><div><div class="txn-name">Sarah M.</div><div class="txn-time">2 min ago · Cash</div></div></div><div class="txn-amount" style="color:var(--accent)">+$248.00</div></div>
+            <div class="txn"><div class="txn-left"><div class="txn-avatar" style="background:rgba(124,92,252,.15);color:var(--accent2)">JK</div><div><div class="txn-name">James K.</div><div class="txn-time">8 min ago · Card</div></div></div><div class="txn-amount" style="color:var(--accent)">+$91.50</div></div>
+            <div class="txn"><div class="txn-left"><div class="txn-avatar" style="background:rgba(255,94,132,.15);color:var(--accent3)">AT</div><div><div class="txn-name">Aisha T. (Online)</div><div class="txn-time">15 min ago · PayPal</div></div></div><div class="txn-amount" style="color:var(--accent)">+$512.00</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- IMPROVEMENTS -->
+
+<div class="split" id="improvements">
+  <div class="fade-up">
+    <div class="section-tag">Where We Go Further</div>
+    <h2 class="section-title">Built to fix what others got wrong</h2>
+    <p class="section-desc">POSflyt was engineered after studying the pain points of legacy retail platforms — and rebuilding from the ground up.</p>
+  </div>
+  <div class="imp-list fade-up">
+    <div class="imp"><div class="imp-icon">⚡</div><div class="imp-text"><h4>Cloud-Native Performance</h4><p>Distributed infrastructure that scales instantly during peak sales hours. No slowdowns during Black Friday rushes.</p></div></div>
+    <div class="imp"><div class="imp-icon">🏦</div><div class="imp-text"><h4>Deep Accounting Engine</h4><p>Multi-currency, region-aware tax compliance, and financial forecasting built in — not bolted on.</p></div></div>
+    <div class="imp"><div class="imp-icon">🎨</div><div class="imp-text"><h4>Modern, Customizable UI</h4><p>Clean dashboards with drag-and-drop layouts, custom themes, and role-based workspace configurations.</p></div></div>
+    <div class="imp"><div class="imp-icon">🔌</div><div class="imp-text"><h4>Open Integration Marketplace</h4><p>500+ connectors for logistics, payroll, CRM, and eCommerce. Plus a REST API for custom-built integrations.</p></div></div>
+    <div class="imp"><div class="imp-icon">🎓</div><div class="imp-text"><h4>White-Glove Support & Learning</h4><p>24/7 live chat, dedicated onboarding, and an interactive knowledge base with video tutorials for every feature.</p></div></div>
+  </div>
+</div>
+
+<!-- FUTURE / ROADMAP -->
+
+<div class="future-section" id="roadmap">
+  <div class="center-header fade-up">
+    <div class="section-tag">Roadmap</div>
+    <h2 class="section-title">What's coming<br>to POSflyt</h2>
+    <p class="section-desc">We're not just building a product — we're building the future of commerce infrastructure.</p>
+  </div>
+  <div class="future-grid fade-up">
+    <div class="future-card"><div class="future-num">Q2 2026</div><div class="future-title">AI-Powered Demand Intelligence</div><p class="future-desc">Predict inventory needs before shelves run dry. Automated fraud detection and AI chatbot for order tracking.</p></div>
+    <div class="future-card"><div class="future-num">Q2 2026</div><div class="future-title">Business Owner Mobile App</div><p class="future-desc">Track live sales, stock levels, and financials from your phone. Push alerts for low stock and high-value transactions.</p></div>
+    <div class="future-card"><div class="future-num">Q3 2026</div><div class="future-title">Enhanced Multi-Store Hub</div><p class="future-desc">Manage unlimited store locations from one screen. Region-based pricing, promotions, and performance benchmarking.</p></div>
+    <div class="future-card"><div class="future-num">Q3 2026</div><div class="future-title">3PL Logistics Integration</div><p class="future-desc">Connect with major logistics providers for real-time shipping, automated dispatch, and delivery tracking.</p></div>
+    <div class="future-card"><div class="future-num">Q4 2026</div><div class="future-title">Blockchain Supplier Payments</div><p class="future-desc">Tamper-proof transaction logs and cryptographically secured supplier payments for maximum trust and audit clarity.</p></div>
+    <div class="future-card"><div class="future-num">Q4 2026</div><div class="future-title">Sales Gamification Engine</div><p class="future-desc">Leaderboards, achievement badges, and reward incentives that turn your team into top performers.</p></div>
+    <div class="future-card"><div class="future-num">2027</div><div class="future-title">AR Shopping Integration</div><p class="future-desc">Virtual try-ons for apparel and furniture using augmented reality, with AI-driven product recommendations.</p></div>
+    <div class="future-card"><div class="future-num">2027</div><div class="future-title">Developer App Marketplace</div><p class="future-desc">A thriving ecosystem where developers build and sell plugins, plus no-code tools for custom workflow building.</p></div>
+  </div>
+</div>
+
+<!-- PRICING -->
+
+<section id="pricing" class="pricing-section">
+  <div class="center-header fade-up" style="margin-bottom:0">
+    <div class="section-tag">Pricing</div>
+    <h2 class="section-title">Simple, honest pricing</h2>
+    <p class="section-desc">No hidden fees. No per-module charges. Everything you need, priced for where you are.</p>
+  </div>
+  <div class="pricing-grid fade-up">
+    <div class="pricing-card">
+      <div class="plan-name">Starter</div>
+      <div class="plan-price"><sup>$</sup>79</div>
+      <div class="plan-period">per month · up to 2 locations</div>
+      <ul class="plan-features">
+        <li>Full POS system</li>
+        <li>Inventory management</li>
+        <li>Basic CRM</li>
+        <li>Standard reporting</li>
+        <li>Email support</li>
+        <li>5 staff accounts</li>
+      </ul>
+      <a href="#" class="btn-plan">Get started free</a>
+    </div>
+    <div class="pricing-card feat">
+      <div class="feat-badge">Most Popular</div>
+      <div class="plan-name">Growth</div>
+      <div class="plan-price"><sup>$</sup>199</div>
+      <div class="plan-period">per month · up to 10 locations</div>
+      <ul class="plan-features">
+        <li>Everything in Starter</li>
+        <li>Omnichannel & eCommerce</li>
+        <li>Advanced CRM & Loyalty</li>
+        <li>Accounting & Finance module</li>
+        <li>Van Sales & Mobile POS</li>
+        <li>Supply Chain management</li>
+        <li>Priority live chat support</li>
+        <li>25 staff accounts</li>
+      </ul>
+      <a href="#" class="btn-plan primary">Start free trial</a>
+    </div>
+    <div class="pricing-card">
+      <div class="plan-name">Enterprise</div>
+      <div class="plan-price">Custom</div>
+      <div class="plan-period">tailored to your scale</div>
+      <ul class="plan-features">
+        <li>Everything in Growth</li>
+        <li>Unlimited locations</li>
+        <li>Custom API integrations</li>
+        <li>Dedicated account manager</li>
+        <li>SLA with 99.99% uptime</li>
+        <li>White-label options</li>
+        <li>On-site training</li>
+        <li>Unlimited staff accounts</li>
+      </ul>
+      <a href="#" class="btn-plan">Talk to sales</a>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+
+<div class="cta-section">
+  <div class="cta-box fade-up">
+    <h2>Ready to take flight?</h2>
+    <p>Join 12,000+ businesses running smarter with POSflyt. No credit card required. 14-day free trial.</p>
+    <div class="hero-actions" style="justify-content:center">
+      <a href="#" class="btn-primary">Start your free trial →</a>
+      <a href="#" class="btn-secondary">Schedule a demo</a>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+
+<footer>
+  <div class="footer-logo">POS<span>flyt</span></div>
+  <ul class="footer-links">
+    <li><a href="#">Features</a></li>
+    <li><a href="#">Pricing</a></li>
+    <li><a href="#">Docs</a></li>
+    <li><a href="#">Blog</a></li>
+    <li><a href="#">Privacy</a></li>
+  </ul>
+  <p>© 2026 POSflyt Inc. All rights reserved.</p>
+</footer>
+
+<script>
+// Bar chart
+const bars = [
+  {h:30,c:'rgba(0,229,255,.3)'},{h:45,c:'rgba(0,229,255,.4)'},{h:60,c:'rgba(0,229,255,.5)'},
+  {h:40,c:'rgba(0,229,255,.35)'},{h:75,c:'rgba(0,229,255,.7)'},{h:55,c:'rgba(0,229,255,.5)'},
+  {h:90,c:'rgba(0,229,255,.85)'},{h:70,c:'rgba(0,229,255,.65)'},{h:80,c:'rgba(124,92,252,.8)'},
+  {h:65,c:'rgba(124,92,252,.65)'},{h:50,c:'rgba(124,92,252,.5)'},{h:35,c:'rgba(124,92,252,.4)'}
+];
+const bc = document.getElementById('barChart');
+bars.forEach(b => {
+  const el = document.createElement('div');
+  el.className = 'bar';
+  el.style.cssText = `height:${b.h}%;background:${b.c};`;
+  bc.appendChild(el);
+});
+
+// Scroll animations
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.12 });
+document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+// Nav highlight
+window.addEventListener('scroll', () => {
+  const nav = document.querySelector('nav');
+  nav.style.background = window.scrollY > 60 ? 'rgba(10,10,15,0.92)' : 'rgba(10,10,15,0.75)';
+});
+
+// Hover glow effect on future cards
+document.querySelectorAll('.future-card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width * 100).toFixed(1);
+    const y = ((e.clientY - r.top) / r.height * 100).toFixed(1);
+    card.style.background = `radial-gradient(circle at ${x}% ${y}%, rgba(124,92,252,0.08), var(--ink2) 60%)`;
+  });
+  card.addEventListener('mouseleave', () => { card.style.background = ''; });
+});
+</script>
+
+</body>
+</html>

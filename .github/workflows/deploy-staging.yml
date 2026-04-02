@@ -1,0 +1,66 @@
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy and Verify Staging
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Trigger staging deploy hook
+        env:
+          STAGING_DEPLOY_HOOK_URL: ${{ secrets.STAGING_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$STAGING_DEPLOY_HOOK_URL" ]; then
+            echo "STAGING_DEPLOY_HOOK_URL is required."
+            exit 1
+          fi
+          curl -fsS -X POST "$STAGING_DEPLOY_HOOK_URL"
+
+      - name: Verify API health endpoint
+        env:
+          STAGING_API_HEALTH_URL: ${{ secrets.STAGING_API_HEALTH_URL }}
+        run: |
+          if [ -z "$STAGING_API_HEALTH_URL" ]; then
+            echo "STAGING_API_HEALTH_URL is required."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS "$STAGING_API_HEALTH_URL" > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "Health check attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "API health check failed."
+          exit 1
+
+      - name: Verify system health endpoint
+        env:
+          STAGING_SYSTEM_HEALTH_URL: ${{ secrets.STAGING_SYSTEM_HEALTH_URL }}
+        run: |
+          if [ -z "$STAGING_SYSTEM_HEALTH_URL" ]; then
+            echo "STAGING_SYSTEM_HEALTH_URL is required."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS "$STAGING_SYSTEM_HEALTH_URL" > /tmp/system-health.json; then
+              cat /tmp/system-health.json
+              exit 0
+            fi
+            echo "System health attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "System health check failed."
+          exit 1

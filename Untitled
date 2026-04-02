@@ -1,0 +1,222 @@
+You are improving the product clarity, content, and user communication of a SaaS POS + ERP platform called POSflyt.
+
+The system is already functional. Your task is NOT to add features, but to:
+
+* Make the product understandable
+* Make the value obvious
+* Make the app feel trustworthy and professional
+* Remove all generic or vague wording
+
+Do NOT add unnecessary features. Focus only on clarity, communication, and structure.
+
+---
+
+## PHASE C1 — PRODUCT CLARITY (CRITICAL)
+
+OBJECTIVE:
+Ensure users understand what POSflyt does from the first interaction.
+
+---
+
+## STEP 1 — DEFINE CORE VALUE
+
+1. Update all landing page and in-app copy to clearly communicate:
+
+POSflyt is:
+
+* A system that tracks sales
+* Manages inventory
+* Monitors staff activity
+* Works even without internet
+
+2. Avoid generic phrases like:
+
+* "Powerful solution"
+* "All-in-one platform"
+
+3. Use simple, direct language focused on outcomes.
+
+---
+
+## STEP 2 — USER JOURNEY EXPLANATION
+
+1. Add a clear “How it works” section:
+
+Explain in order:
+
+* Add products
+* Make sales using POS
+* Track transactions
+* View reports and staff activity
+
+2. Ensure:
+
+* Users understand the full flow before using the app
+
+---
+
+## PHASE C2 — ONBOARDING EXPERIENCE
+
+OBJECTIVE:
+Guide new users step-by-step so they do not get confused.
+
+---
+
+## STEP 3 — FIRST-TIME USER FLOW
+
+1. After registration, guide user through:
+
+* Step 1: Add first product
+* Step 2: Make first sale
+* Step 3: View dashboard
+
+2. Show progress indicators.
+
+3. Do NOT leave users on an empty dashboard.
+
+---
+
+## STEP 4 — EMPTY STATE CONTENT
+
+1. For all empty pages (inventory, dashboard, customers):
+
+Add helpful messages like:
+
+* “You haven’t added any products yet. Start by adding your first product.”
+
+2. Include clear action buttons.
+
+---
+
+## PHASE C3 — FEATURE EXPLANATION INSIDE APP
+
+OBJECTIVE:
+Make every feature self-explanatory.
+
+---
+
+## STEP 5 — TOOLTIP / HELPER TEXT
+
+1. Add short explanations for:
+
+* POS screen
+* Dashboard metrics
+* Settings options
+
+2. Keep explanations short and practical.
+
+---
+
+## PHASE C4 — TERMS OF SERVICE (REAL, NOT VAGUE)
+
+OBJECTIVE:
+Create a clear and professional Terms of Service.
+
+---
+
+## STEP 6 — TERMS CONTENT
+
+1. Define clearly:
+
+* What POSflyt provides (POS + inventory + analytics system)
+* User responsibilities (accurate data, lawful use)
+* Payment terms (subscription-based service)
+* Service availability (no guarantee of uninterrupted service)
+* Limitation of liability
+
+2. Ensure:
+
+* Language is simple and readable
+* No vague statements
+
+---
+
+## PHASE C5 — PRIVACY POLICY (CLEAR & TRUST-BUILDING)
+
+OBJECTIVE:
+Explain how user data is handled in a transparent way.
+
+---
+
+## STEP 7 — PRIVACY CONTENT
+
+1. Clearly explain:
+
+* What data is collected:
+
+  * Business info
+  * Transactions
+  * User accounts
+
+* Why data is collected:
+
+  * To operate the system
+  * To provide analytics
+
+* What is NOT done:
+
+  * Data is not sold
+
+* Security approach:
+
+  * Data is stored securely
+
+2. Ensure:
+
+* No legal jargon overload
+* Easy to understand
+
+---
+
+## PHASE C6 — TRUST & PROFESSIONALISM
+
+OBJECTIVE:
+Make the app feel reliable and credible.
+
+---
+
+## STEP 8 — TRUST ELEMENTS
+
+1. Add:
+
+* “Your data is محفوظ and backed up” messaging
+* System status indicator
+* Support/contact information
+
+2. Ensure:
+
+* Users feel safe using the system
+
+---
+
+## PHASE C7 — CONSISTENCY CLEANUP
+
+OBJECTIVE:
+Remove all confusion across the app.
+
+---
+
+## STEP 9 — COPY AUDIT
+
+1. Review all pages:
+
+* Landing page
+* Dashboard
+* POS
+* Settings
+
+2. Ensure:
+
+* Consistent terminology
+* No conflicting messages
+
+---
+
+## FINAL RULES
+
+* Do NOT use generic SaaS buzzwords
+* Focus on clarity over creativity
+* Make every feature understandable without explanation
+* Ensure users know exactly what to do at every step
+
+Execute step-by-step.

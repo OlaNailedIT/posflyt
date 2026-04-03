@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useOnboardingStatus } from "../hooks/useOnboarding";
 import { useProducts } from "../hooks/useProducts";
 
@@ -14,18 +14,15 @@ export default function OnboardingPage() {
   const { data, isLoading } = useOnboardingStatus();
   const { data: products = [] } = useProducts();
   const [template, setTemplate] = useState("Mini-mart");
+  const firstSaleDone = Boolean(data?.firstSaleDone);
+  const productsTargetDone = products.length >= 3;
+  const onboardingProgress = Math.round((Number(productsTargetDone) + Number(firstSaleDone)) / 2 * 100);
 
   if (isLoading) {
     return <p className="text-sm text-stone-500">Loading onboarding...</p>;
   }
 
   const firstProductDone = Boolean(data?.firstProductDone);
-  const firstSaleDone = Boolean(data?.firstSaleDone);
-  const productsTargetDone = products.length >= 3;
-  const onboardingProgress = useMemo(() => {
-    const completed = Number(productsTargetDone) + Number(firstSaleDone);
-    return Math.round((completed / 2) * 100);
-  }, [productsTargetDone, firstSaleDone]);
 
   return (
     <section className="space-y-4">

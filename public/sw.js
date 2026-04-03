@@ -1,4 +1,4 @@
-const CACHE_NAME = "posflyt-cache-v1";
+const CACHE_NAME = "posflyt-cache-v2";
 const CORE_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -19,6 +19,22 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
+  const isSameOrigin = request.url.startsWith(self.location.origin);
+  const isNavigation = request.mode === "navigate";
+
+  // Always fetch HTML fresh first to avoid serving stale bundle hashes after deploy.
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("/index.html", clone)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then((cached) => {
@@ -26,7 +42,7 @@ self.addEventListener("fetch", (event) => {
       return fetch(request)
         .then((response) => {
           const clone = response.clone();
-          if (request.url.startsWith(self.location.origin)) {
+          if (isSameOrigin) {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
           }
           return response;

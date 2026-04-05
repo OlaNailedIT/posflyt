@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useOnboardingStatus } from "../hooks/useOnboarding";
 import { useProducts } from "../hooks/useProducts";
 
@@ -10,19 +10,81 @@ const templates = {
   Salon: "Add top services/products and complete one sale to verify your workflow.",
 };
 
+function safePercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
+
 export default function OnboardingPage() {
-  const { data, isLoading } = useOnboardingStatus();
-  const { data: products = [] } = useProducts();
+  const {
+    data,
+    isLoading: onboardingLoading,
+    isError: onboardingError,
+    error: onboardingErr,
+    refetch: refetchOnboarding,
+  } = useOnboardingStatus();
+  const {
+    data: products = [],
+    isLoading: productsLoading,
+    isError: productsError,
+    refetch: refetchProducts,
+  } = useProducts();
   const [template, setTemplate] = useState("Mini-mart");
+
   const firstSaleDone = Boolean(data?.firstSaleDone);
   const productsTargetDone = products.length >= 3;
-  const onboardingProgress = Math.round((Number(productsTargetDone) + Number(firstSaleDone)) / 2 * 100);
+  const rawProgress = (Number(productsTargetDone) + Number(firstSaleDone)) / 2 * 100;
+  const onboardingProgress = safePercent(rawProgress);
 
-  if (isLoading) {
-    return <p className="text-sm text-stone-500">Loading onboarding...</p>;
+  const loading = onboardingLoading || productsLoading;
+  const fetchError = onboardingError || productsError;
+
+  const errorMessage = useMemo(() => {
+    const msg = onboardingErr?.message || "";
+    if (productsError && onboardingError) return "We could not load onboarding or products. Check your connection and try again.";
+    if (onboardingError) return msg || "Could not load onboarding status.";
+    if (productsError) return "Could not load products. You can still use Inventory and POS.";
+    return "";
+  }, [onboardingErr, onboardingError, productsError]);
+
+  if (loading) {
+    return (
+      <section className="min-h-[12rem] space-y-4" aria-busy="true" aria-live="polite">
+        <div className="h-8 w-48 animate-pulse rounded bg-stone-200 dark:bg-stone-700" />
+        <div className="h-4 w-full max-w-md animate-pulse rounded bg-stone-200 dark:bg-stone-700" />
+        <div className="h-32 animate-pulse rounded-xl bg-stone-200 dark:bg-stone-700" />
+        <p className="text-sm text-stone-500">Loading onboarding…</p>
+      </section>
+    );
   }
 
-  const firstProductDone = Boolean(data?.firstProductDone);
+  if (fetchError) {
+    return (
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+        <p className="font-semibold">Could not load everything</p>
+        <p className="mt-1">{errorMessage}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white"
+            onClick={() => {
+              refetchOnboarding();
+              refetchProducts();
+            }}
+          >
+            Retry
+          </button>
+          <Link to="/inventory" className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs dark:border-stone-600">
+            Go to Inventory
+          </Link>
+          <Link to="/dashboard" className="rounded-lg border border-stone-300 px-3 py-1.5 text-xs dark:border-stone-600">
+            Dashboard
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
@@ -50,10 +112,10 @@ export default function OnboardingPage() {
       <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-900">
         <div className="mb-3">
           <p className="text-sm">Progress: {onboardingProgress}%</p>
-          <div className="mt-1 h-2 rounded bg-stone-200 dark:bg-stone-700">
+          <div className="mt-1 h-2 w-full rounded bg-stone-200 dark:bg-stone-700">
             <div
               className="h-2 rounded bg-teal-600 dark:bg-teal-500"
-              style={{ width: `${onboardingProgress}%` }}
+              style={{ width: `${String(onboardingProgress)}%` }}
             />
           </div>
         </div>
@@ -68,7 +130,7 @@ export default function OnboardingPage() {
             {productsTargetDone && firstSaleDone ? "Done" : "Pending"} - Step 3: Review first-day summary
           </li>
         </ul>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           <Link to="/inventory" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
             Add Product
           </Link>

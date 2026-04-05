@@ -53,6 +53,41 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => {
+        const SW_RELOAD_KEY = "posflyt-sw-activate-reload";
+
+        const promptReload = () => {
+          if (typeof window === "undefined") return;
+          if (window.confirm("A new version is available. Reload to update?")) {
+            sessionStorage.setItem(SW_RELOAD_KEY, "1");
+            if (registration.waiting) {
+              registration.waiting.postMessage({ type: "SKIP_WAITING" });
+            }
+          }
+        };
+
+        registration.addEventListener("updatefound", () => {
+          const newWorker = registration.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              promptReload();
+            }
+          });
+        });
+
+        if (registration.waiting && navigator.serviceWorker.controller) {
+          promptReload();
+        }
+
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (sessionStorage.getItem(SW_RELOAD_KEY) !== "1") return;
+          sessionStorage.removeItem(SW_RELOAD_KEY);
+          window.location.reload();
+        });
+      })
+      .catch(() => {});
   });
 }

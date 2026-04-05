@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useAuthStore } from "../stores/authStore";
+import { getStoredAuthTokenSync } from "../utils/authToken";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:4000",
@@ -11,9 +12,23 @@ function unwrap(data) {
     : data;
 }
 
+function resolveAuthToken() {
+  const fromStore = useAuthStore.getState().token;
+  if (fromStore) return fromStore;
+  return getStoredAuthTokenSync();
+}
+
+function isAuthRouteRequest(config) {
+  const url = String(config?.url || "");
+  return url.includes("/auth/login") || url.includes("/auth/register");
+}
+
 api.interceptors.request.use((config) => {
-  const { token } = useAuthStore.getState();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const token = resolveAuthToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
@@ -21,7 +36,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
-    if (status === 401) {
+    if (status === 401 && !isAuthRouteRequest(error.config || {})) {
       const { logout } = useAuthStore.getState();
       logout();
       if (typeof window !== "undefined" && window.location.pathname !== "/login") {

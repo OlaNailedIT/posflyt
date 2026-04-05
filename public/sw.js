@@ -1,4 +1,4 @@
-const CACHE_NAME = "posflyt-cache-v2";
+const CACHE_NAME = "posflyt-cache-v3";
 const CORE_ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -16,13 +16,26 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING" || event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
+
   const isSameOrigin = request.url.startsWith(self.location.origin);
   const isNavigation = request.mode === "navigate";
 
-  // Always fetch HTML fresh first to avoid serving stale bundle hashes after deploy.
+  // Cross-origin API (e.g. Render backend): network only — never cache API responses.
+  if (!isSameOrigin) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  // HTML navigations: network first, cache fallback when offline.
   if (isNavigation) {
     event.respondWith(
       fetch(request)
@@ -36,18 +49,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Same-origin assets (JS/CSS): network first, then cache (offline / faster repeat).
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          if (isSameOrigin) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
-          }
-          return response;
-        })
-        .catch(() => caches.match("/index.html"));
-    })
+    fetch(request)
+      .then((response) => {
+        const clone = response.clone();
+        if (response.ok) {
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone)).catch(() => {});
+        }
+        return response;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match("/index.html")))
   );
 });

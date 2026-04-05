@@ -7,9 +7,223 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-//////////////////////////////////////
-// ENUMS
-//////////////////////////////////////
+model Business {
+  id             String              @id @default(uuid())
+  name           String
+  createdAt      DateTime            @default(now())
+  auditLogs      AuditLog[]
+  backups        BackupRecord[]
+  customers      Customer[]
+  issues         IssueReport[]
+  onboarding     OnboardingProgress?
+  paymentHistory PaymentHistory[]
+  products       Product[]
+  settings       Settings?
+  smartAlerts    SmartAlert[]
+  stores         Store[]
+  subscription   Subscription?
+  transactions   Transaction[]
+  users          User[]
+}
+
+model User {
+  id           String          @id @default(uuid())
+  name         String
+  email        String          @unique
+  password     String
+  role         Role            @default(CASHIER)
+  createdAt    DateTime        @default(now())
+  businessId   String
+  sessions     ActiveSession[]
+  auditLogs    AuditLog[]
+  issues       IssueReport[]
+  transactions Transaction[]
+  business     Business        @relation(fields: [businessId], references: [id])
+}
+
+model Store {
+  id           String        @id @default(uuid())
+  name         String
+  location     String?
+  createdAt    DateTime      @default(now())
+  businessId   String
+  products     Product[]
+  business     Business      @relation(fields: [businessId], references: [id])
+  transactions Transaction[]
+}
+
+model Product {
+  id                String            @id
+  name              String
+  costPrice         Float             @default(0)
+  sellingPrice      Float             @default(0)
+  price             Float
+  stock             Int
+  lowStockThreshold Int               @default(10)
+  barcode           String?           @unique
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  businessId        String
+  storeId           String?
+  business          Business          @relation(fields: [businessId], references: [id])
+  store             Store?            @relation(fields: [storeId], references: [id])
+  transactionItems  TransactionItem[]
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  name         String
+  email        String?
+  phone        String?
+  createdAt    DateTime      @default(now())
+  businessId   String
+  business     Business      @relation(fields: [businessId], references: [id])
+  transactions Transaction[]
+}
+
+model Transaction {
+  id            String            @id
+  total         Float
+  paymentMethod PaymentMethod
+  createdAt     DateTime
+  syncedAt      DateTime?
+  syncStatus    SyncStatus        @default(PENDING)
+  businessId    String
+  userId        String
+  storeId       String?
+  customerId    String?
+  business      Business          @relation(fields: [businessId], references: [id])
+  customer      Customer?         @relation(fields: [customerId], references: [id])
+  store         Store?            @relation(fields: [storeId], references: [id])
+  user          User              @relation(fields: [userId], references: [id])
+  items         TransactionItem[]
+}
+
+model TransactionItem {
+  id            String      @id @default(uuid())
+  quantity      Int
+  price         Float
+  transactionId String
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id])
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+}
+
+model Settings {
+  id             String   @id @default(uuid())
+  countryCode    String   @default("US")
+  currencyCode   String   @default("USD")
+  currencySymbol String   @default("$")
+  taxEnabled     Boolean  @default(false)
+  taxRate        Float    @default(0)
+  taxRules       Json?
+  businessName   String
+  businessEmail  String
+  businessPhone  String?
+  logoUrl        String?
+  receiptLayout  String?  @default("STANDARD")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  businessId     String   @unique
+  business       Business @relation(fields: [businessId], references: [id])
+}
+
+model Subscription {
+  id           String             @id @default(uuid())
+  plan         SubscriptionPlan   @default(FREE)
+  status       SubscriptionStatus @default(ACTIVE)
+  provider     String?
+  externalRef  String?
+  expiresAt    DateTime?
+  featureFlags Json?
+  usageLimits  Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  businessId   String             @unique
+  business     Business           @relation(fields: [businessId], references: [id])
+}
+
+model OnboardingProgress {
+  id               String   @id @default(uuid())
+  firstProductDone Boolean  @default(false)
+  firstSaleDone    Boolean  @default(false)
+  lastActiveAt     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  businessId       String   @unique
+  business         Business @relation(fields: [businessId], references: [id])
+}
+
+model SmartAlert {
+  id         String    @id @default(uuid())
+  type       AlertType
+  message    String
+  alertDate  DateTime
+  createdAt  DateTime  @default(now())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, type, alertDate])
+}
+
+model PaymentHistory {
+  id          String           @id @default(uuid())
+  provider    String
+  providerRef String
+  plan        SubscriptionPlan
+  amount      Float
+  currency    String           @default("USD")
+  status      String
+  paidAt      DateTime?
+  createdAt   DateTime         @default(now())
+  businessId  String
+  business    Business         @relation(fields: [businessId], references: [id])
+}
+
+model ActiveSession {
+  id         String    @id @default(uuid())
+  tokenJti   String    @unique
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  businessId String
+  userId     String?
+  business   Business @relation(fields: [businessId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+}
+
+model BackupRecord {
+  id         String   @id @default(uuid())
+  filePath   String
+  sizeBytes  Int
+  status     String
+  createdAt  DateTime @default(now())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+}
+
+model IssueReport {
+  id          String   @id @default(uuid())
+  subject     String
+  description String
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+  businessId  String
+  userId      String?
+  business    Business @relation(fields: [businessId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+}
 
 enum Role {
   ADMIN
@@ -45,266 +259,4 @@ enum SubscriptionStatus {
 enum AlertType {
   SALES_SPIKE
   SALES_DROP
-}
-
-//////////////////////////////////////
-// CORE MODELS
-//////////////////////////////////////
-
-model Business {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-
-  users        User[]
-  stores       Store[]
-  products     Product[]
-  customers    Customer[]
-  transactions Transaction[]
-  settings     Settings?
-  subscription Subscription?
-  onboarding   OnboardingProgress?
-  smartAlerts  SmartAlert[]
-  paymentHistory PaymentHistory[]
-  backups      BackupRecord[]
-  issues       IssueReport[]
-  auditLogs    AuditLog[]
-}
-
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(CASHIER)
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  transactions Transaction[]
-  sessions     ActiveSession[]
-  auditLogs    AuditLog[]
-  issues       IssueReport[]
-}
-
-model Store {
-  id        String   @id @default(uuid())
-  name      String
-  location  String?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  products     Product[]
-  transactions Transaction[]
-}
-
-//////////////////////////////////////
-// PRODUCT & INVENTORY
-//////////////////////////////////////
-
-model Product {
-  id        String   @id // client-generated UUID for offline support
-  name      String
-  costPrice Float    @default(0)
-  sellingPrice Float @default(0)
-  price     Float
-  stock     Int
-  lowStockThreshold Int @default(10)
-  barcode   String?  @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  storeId String?
-  store   Store? @relation(fields: [storeId], references: [id])
-
-  transactionItems TransactionItem[]
-}
-
-//////////////////////////////////////
-// CUSTOMERS (FOR CRM LATER)
-//////////////////////////////////////
-
-model Customer {
-  id        String   @id @default(uuid())
-  name      String
-  email     String?
-  phone     String?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  transactions Transaction[]
-}
-
-//////////////////////////////////////
-// TRANSACTIONS (CORE POS ENGINE)
-//////////////////////////////////////
-
-model Transaction {
-  id            String   @id // client-generated for offline sync
-  total         Float
-  paymentMethod PaymentMethod
-  createdAt     DateTime
-  syncedAt      DateTime?
-  syncStatus    SyncStatus @default(PENDING)
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String
-  user   User @relation(fields: [userId], references: [id])
-
-  storeId String?
-  store   Store? @relation(fields: [storeId], references: [id])
-
-  customerId String?
-  customer   Customer? @relation(fields: [customerId], references: [id])
-
-  items TransactionItem[]
-}
-
-model TransactionItem {
-  id       String @id @default(uuid())
-  quantity Int
-  price    Float
-
-  transactionId String
-  transaction   Transaction @relation(fields: [transactionId], references: [id])
-
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-}
-
-model Settings {
-  id             String   @id @default(uuid())
-  countryCode    String   @default("US")
-  currencyCode   String   @default("USD")
-  currencySymbol String   @default("$")
-  taxEnabled     Boolean  @default(false)
-  taxRate        Float    @default(0)
-  taxRules       Json?
-  businessName   String
-  businessEmail  String
-  businessPhone  String?
-  logoUrl        String?
-  receiptLayout  String?  @default("STANDARD")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model Subscription {
-  id           String           @id @default(uuid())
-  plan         SubscriptionPlan @default(FREE)
-  status       SubscriptionStatus @default(ACTIVE)
-  provider     String?
-  externalRef  String?
-  expiresAt    DateTime?
-  featureFlags Json?
-  usageLimits  Json?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model OnboardingProgress {
-  id               String   @id @default(uuid())
-  firstProductDone Boolean  @default(false)
-  firstSaleDone    Boolean  @default(false)
-  lastActiveAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model SmartAlert {
-  id        String    @id @default(uuid())
-  type      AlertType
-  message   String
-  alertDate DateTime
-  createdAt DateTime  @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  @@unique([businessId, type, alertDate])
-}
-
-model PaymentHistory {
-  id          String   @id @default(uuid())
-  provider    String
-  providerRef String
-  plan        SubscriptionPlan
-  amount      Float
-  currency    String   @default("USD")
-  status      String
-  paidAt      DateTime?
-  createdAt   DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model ActiveSession {
-  id         String   @id @default(uuid())
-  tokenJti   String   @unique
-  userAgent  String?
-  ipAddress  String?
-  createdAt  DateTime @default(now())
-  lastSeenAt DateTime @default(now())
-  revokedAt  DateTime?
-
-  userId String
-  user   User @relation(fields: [userId], references: [id])
-}
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  action    String
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String?
-  user   User? @relation(fields: [userId], references: [id])
-}
-
-model BackupRecord {
-  id        String   @id @default(uuid())
-  filePath  String
-  sizeBytes Int
-  status    String
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model IssueReport {
-  id          String   @id @default(uuid())
-  subject     String
-  description String
-  status      String   @default("OPEN")
-  createdAt   DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String?
-  user   User? @relation(fields: [userId], references: [id])
 }

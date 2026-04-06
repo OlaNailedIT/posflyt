@@ -22,11 +22,14 @@ import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import StaffPage from "./pages/StaffPage";
 import { VALIDATION_MODE } from "./config/productMode";
+import OnboardingErrorBoundary from "./components/OnboardingErrorBoundary";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/ng" element={<LandingPage />} />
+      <Route path="/za" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
@@ -41,7 +44,14 @@ export default function App() {
         <Route path="/pos" element={<PosPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/customers" element={<CustomersPage />} />
-        <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route
+          path="/onboarding"
+          element={
+            <OnboardingErrorBoundary>
+              <OnboardingPage />
+            </OnboardingErrorBoundary>
+          }
+        />
         <Route
           path="/staff"
           element={

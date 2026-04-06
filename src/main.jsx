@@ -9,6 +9,7 @@ import { useOfflineSync } from "./hooks/useOfflineSync";
 import { useSettings } from "./hooks/useSettings";
 import ToastHost from "./components/ToastHost";
 import ThemeSync from "./components/ThemeSync";
+import { RegionProvider } from "./context/RegionContext";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,7 +46,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppBootstrap />
+        <RegionProvider>
+          <AppBootstrap />
+        </RegionProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>

@@ -1,9 +1,10 @@
 import axios from "axios";
+import { API_BASE_URL } from "../config/apiBaseUrl";
 import { useAuthStore } from "../stores/authStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:4000",
+  baseURL: API_BASE_URL,
 });
 
 function unwrap(data) {

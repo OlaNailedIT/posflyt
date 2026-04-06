@@ -55,7 +55,9 @@ export async function getDashboardCache() {
 
 export async function enqueueTransaction(transactionPayload) {
   const db = await getDb();
-  const id = `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id =
+    transactionPayload?.client_transaction_id ||
+    `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const entry = {
     id,
     payload: transactionPayload,

@@ -32,6 +32,12 @@ async function syncSequentially(queue, onProgress) {
     try {
       const response = await postTransaction(payload);
       const first = Array.isArray(response?.results) ? response.results[0] : null;
+      if (first?.status === "duplicate") {
+        await removeQueuedTransaction(item.id);
+        done += 1;
+        onProgress?.({ done, total: queue.length, failed });
+        continue;
+      }
       if (Number(response?.failed || 0) > 0 || first?.status === "failed") {
         const code = first?.code || "TRANSIENT_SYNC_FAILURE";
         const messageByCode = {

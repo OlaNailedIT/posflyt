@@ -9,7 +9,6 @@ import { useAdminSalesFeed } from "../hooks/useAdminSalesFeed";
 import { useEffect } from "react";
 import { useNotificationStore } from "../stores/notificationStore";
 import { useOnboardingStatus } from "../hooks/useOnboarding";
-import { CORE_POSITIONING, CORE_VALUE_POINTS, VALIDATION_MODE } from "../config/productMode";
 import ExpandableSection from "../components/ui/ExpandableSection";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useAdminDailyClose, useReliabilitySummary } from "../hooks/useSystem";
@@ -78,14 +77,11 @@ export default function DashboardPage() {
 
   const cards = useMemo(
     () => [
-    [
-      "Revenue (today)",
-      formatMoney(stats?.revenue || 0, settings.currencySymbol),
-    ],
-    ["Transactions (today)", stats?.transactions ?? 0],
-    ["Low stock products", stats?.lowStock ?? 0],
-    ["Active customers", stats?.customers ?? 0],
-    ["Returning customers", stats?.returningCustomers ?? 0],
+      ["Revenue (today)", formatMoney(stats?.revenue || 0, settings.currencySymbol)],
+      ["Transactions (today)", stats?.transactions ?? 0],
+      ["Low stock products", stats?.lowStock ?? 0],
+      ["Active customers", stats?.customers ?? 0],
+      ["Returning customers", stats?.returningCustomers ?? 0],
     ],
     [settings.currencySymbol, stats?.customers, stats?.lowStock, stats?.returningCustomers, stats?.revenue, stats?.transactions]
   );
@@ -116,32 +112,17 @@ export default function DashboardPage() {
   const trustSummaryText = `POSflyt Sync Update: Pending ${pendingTransactions}, Failed ${failedTransactions}, Duplicates prevented ${reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}, Last synced ${lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : "Not yet"}, Reconciliation: ${confidence}.`;
 
   return (
-    <section>
-      <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Dashboard</h1>
-      <p className="mt-1 text-sm font-semibold text-stone-800 dark:text-stone-200">POSflyt helps you:</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {CORE_VALUE_POINTS.map((point) => (
-          <span
-            key={point}
-            className="rounded-full border border-stone-300 bg-white px-2.5 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-300"
-          >
-            {point}
-          </span>
-        ))}
-      </div>
-      <p className="mt-2 text-sm font-medium text-stone-700 dark:text-stone-300">{CORE_POSITIONING}</p>
-      <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
-        Track today&apos;s sales, stock risk, and customer activity in one place.
-      </p>
-      <p className="mt-1 text-sm font-semibold text-teal-700 dark:text-teal-400">
-        Works even when your internet is down.
-      </p>
-      <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-        Last synced: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "Not synced yet"} · Data
-        mode: {pendingTransactions > 0 ? "includes pending local sales" : "synced-only"}
-      </p>
+    <section className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Dashboard</h1>
+        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+          Last synced: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "Not synced yet"} · Data
+          mode: {pendingTransactions > 0 ? "includes pending local sales" : "synced-only"}
+        </p>
+      </header>
+
       {failedTransactions > 0 && (
-        <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
           {lastSyncError?.toLowerCase().includes("stock unavailable")
             ? "Some sales did not sync because stock changed. Review inventory, then retry sync."
             : "Some sales are not synced yet. Open Settings and tap Sync Now."}
@@ -156,22 +137,22 @@ export default function DashboardPage() {
         </div>
       )}
       {!isOnline && (
-        <p className="mt-2 text-sm text-amber-800 dark:text-amber-400">
+        <p className="text-sm text-amber-800 dark:text-amber-400">
           Offline mode: showing cached stats when available.
         </p>
       )}
       {isError && (
-        <p className="mt-2 text-sm text-amber-800 dark:text-amber-400">
+        <p className="text-sm text-amber-800 dark:text-amber-400">
           Failed to fetch latest dashboard data. Cached data is shown when available.
         </p>
       )}
       {!!onboarding?.reminders?.length && (
-        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
           {onboarding.reminders[0]}
         </div>
       )}
       {(pendingTransactions > 0 || failedTransactions > 0 || Number(stats?.lowStock || 0) > 0) && (
-        <div className="mt-3 grid gap-2 rounded-lg border border-stone-200 bg-white p-3 text-sm dark:border-stone-700 dark:bg-stone-900">
+        <div className="grid gap-2 rounded-lg border border-stone-200 bg-white p-3 text-sm dark:border-stone-700 dark:bg-stone-900">
           {!stats?.transactions && (
             <div className="rounded border border-teal-300 bg-teal-50 px-2 py-1.5 text-teal-900 dark:border-teal-700 dark:bg-teal-900/20 dark:text-teal-300">
               No sales yet today. Start with one checkout in POS.
@@ -198,13 +179,12 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {isLoading && (
-        <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">Loading dashboard...</p>
-      )}
+      {isLoading && <p className="text-sm text-stone-500 dark:text-stone-400">Loading dashboard...</p>}
       {!isLoading && !isError && (stats?.transactions ?? 0) === 0 && (
-        <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
-          No sales yet. Start by adding a product, then make your first sale.
-          <div className="mt-2 flex gap-2">
+        <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
+          <p className="font-medium">No sales today</p>
+          <p className="mt-1 text-xs opacity-90">Add a product, then complete a sale in POS.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
             <Link to="/inventory" className="rounded bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white">
               Add first product
             </Link>
@@ -217,100 +197,48 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-      <p className="mt-3 text-xs text-stone-500 dark:text-stone-400">
-        Revenue and transactions are for today. Other cards show live business totals.
-      </p>
-      <section className="mt-4 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">How it works</h2>
-        <ol className="mt-2 grid gap-2 text-sm md:grid-cols-2">
-          <li>Step 1: Add your products</li>
-          <li>Step 2: Use POS to make sales</li>
-          <li>Step 3: Track sales and inventory</li>
-          <li>Step 4: Monitor your business from the dashboard</li>
-        </ol>
-        <ExpandableSection title="Learn more" className="mt-3">
-          <ul className="space-y-1">
-            <li>Add one product in Inventory to start quickly.</li>
-            <li>Complete one sale in POS to validate your setup.</li>
-            <li>Use Dashboard cards to track today&apos;s progress.</li>
-          </ul>
-        </ExpandableSection>
-      </section>
-      <section className={`mt-4 rounded-xl border p-4 shadow-sm ${confidenceTone}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Trust Center</h2>
-          <span className="rounded border border-current px-2 py-0.5 text-xs">Confidence: {confidence}</span>
-        </div>
-        <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          <div>Synced (24h): {Math.max(Number(reliability?.window === "24h" ? Math.round((reliability?.syncSuccessRate || 0) * 100) : 0), 0)}%</div>
-          <div>Pending: {pendingTransactions}</div>
-          <div>Failed: {failedTransactions}</div>
-          <div>Duplicates prevented: {reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}</div>
-          <div>Last sync: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "Not synced yet"}</div>
-          <div>Reconciliation: {reliability?.lastReconciliationStatus || "Unknown"}</div>
-        </div>
-        <p className="mt-2 text-xs">
-          {queueReplayOrder} {queueLastAttemptAt ? `Last retry: ${new Date(queueLastAttemptAt).toLocaleString()}.` : ""}
-          {queueNextRetryAt ? ` Next retry: ${new Date(queueNextRetryAt).toLocaleString()}.` : ""}
-        </p>
-        {(failedTransactions > 0 || lastSyncError) && (
-          <div className="mt-3 rounded-lg border border-current/40 bg-white/70 px-3 py-2 text-xs dark:bg-stone-950/20">
-            <p className="font-semibold">Fix my sync - {syncRecovery.title}</p>
-            <p className="mt-1">{syncRecovery.guidance}</p>
-          </div>
-        )}
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await syncQueue(true);
-                showToast("Sync started. Status updated in Trust Center.", "success");
-              } catch {
-                showToast("Could not start sync now.", "error");
-              }
-            }}
-            className="rounded bg-teal-700 px-2.5 py-1 text-white dark:bg-teal-500 dark:text-stone-950"
+
+      <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+          Quick actions
+        </h2>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to="/inventory"
+            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white dark:bg-teal-500 dark:text-stone-950"
           >
-            Fix my sync
-          </button>
-          <Link to="/inventory" className="rounded border border-current px-2.5 py-1">
-            Review inventory
+            Add product
           </Link>
-          <Link to="/settings" className="rounded border border-current px-2.5 py-1">
-            View reliability details
+          <Link to="/pos" className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600">
+            Make sale
           </Link>
-          <button
-            type="button"
-            onClick={async () => {
-              await navigator.clipboard.writeText(trustSummaryText);
-              showToast("Reliability summary copied.", "success");
-            }}
-            className="rounded border border-current px-2.5 py-1"
-          >
-            Copy summary
-          </button>
+          <Link to="/help" className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600">
+            Send feedback
+          </Link>
         </div>
       </section>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <p className="sm:col-span-2 lg:col-span-5 -mb-1 text-xs text-stone-500 dark:text-stone-400">
-          Sales cards freshness: {salesBlockFreshness}
-        </p>
-        {cards.map(([k, v]) => (
-          <article
-            key={k}
-            className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900"
-          >
-            <p className="text-sm text-stone-600 dark:text-stone-400">{k}</p>
-            <p className="mt-1 text-2xl font-bold text-stone-900 dark:text-stone-100">{v}</p>
-          </article>
-        ))}
+
+      <div>
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Today&apos;s metrics</h2>
+          <p className="text-xs text-stone-500 dark:text-stone-400">Sales cards: {salesBlockFreshness}</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {cards.map(([k, v]) => (
+            <article
+              key={k}
+              className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900"
+            >
+              <p className="text-sm text-stone-600 dark:text-stone-400">{k}</p>
+              <p className="mt-1 text-2xl font-bold text-stone-900 dark:text-stone-100">{v}</p>
+            </article>
+          ))}
+        </div>
       </div>
-      <section className="mt-6 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Low Stock Alerts</h2>
-        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-          Low stock freshness: {stockBlockFreshness}
-        </p>
+
+      <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Low stock alerts</h2>
+        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Freshness: {stockBlockFreshness}</p>
         <div className="mt-3 space-y-2">
           {(stats?.lowStockProducts || []).length ? (
             stats.lowStockProducts.map((product) => (
@@ -326,7 +254,8 @@ export default function DashboardPage() {
           )}
         </div>
       </section>
-      <ExpandableSection title="Notifications" className="mt-6">
+
+      <ExpandableSection title="Notifications" className="shadow-sm">
         <div className="space-y-2">
           {notifications.length ? (
             notifications.map((note) => (
@@ -339,32 +268,74 @@ export default function DashboardPage() {
           )}
         </div>
       </ExpandableSection>
-      {VALIDATION_MODE && <ExpandableSection title="Validation mode info" className="mt-6">Advanced analytics, forecasting, and investor metrics are hidden. Focus is add product, make sale, and track core results.</ExpandableSection>}
-      <section className="mt-6 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Quick Actions</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Link to="/inventory" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white dark:bg-teal-500 dark:text-stone-950">
-            Add product
-          </Link>
-          <Link to="/pos" className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600">
-            Make sale
-          </Link>
-          <Link to="/help" className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600">
-            Send feedback
-          </Link>
+
+      <ExpandableSection title="Trust Center (sync & reliability)" defaultOpen={false} className={`shadow-sm ${confidenceTone}`}>
+        <div className="space-y-3 text-stone-900 dark:text-stone-100">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium">Confidence</span>
+            <span className="rounded border border-current px-2 py-0.5 text-xs">{confidence}</span>
+          </div>
+          <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              Synced (24h):{" "}
+              {Math.max(Number(reliability?.window === "24h" ? Math.round((reliability?.syncSuccessRate || 0) * 100) : 0), 0)}%
+            </div>
+            <div>Pending: {pendingTransactions}</div>
+            <div>Failed: {failedTransactions}</div>
+            <div>Duplicates prevented: {reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}</div>
+            <div>Last sync: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : "Not synced yet"}</div>
+            <div>Reconciliation: {reliability?.lastReconciliationStatus || "Unknown"}</div>
+          </div>
+          <p className="text-xs">
+            {queueReplayOrder}{" "}
+            {queueLastAttemptAt ? `Last retry: ${new Date(queueLastAttemptAt).toLocaleString()}.` : ""}
+            {queueNextRetryAt ? ` Next retry: ${new Date(queueNextRetryAt).toLocaleString()}.` : ""}
+          </p>
+          {(failedTransactions > 0 || lastSyncError) && (
+            <div className="rounded-lg border border-current/40 bg-white/70 px-3 py-2 text-xs dark:bg-stone-950/20">
+              <p className="font-semibold">Fix my sync — {syncRecovery.title}</p>
+              <p className="mt-1">{syncRecovery.guidance}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await syncQueue(true);
+                  showToast("Sync started. Status updated in Trust Center.", "success");
+                } catch {
+                  showToast("Could not start sync now.", "error");
+                }
+              }}
+              className="rounded bg-teal-700 px-2.5 py-1 text-white dark:bg-teal-500 dark:text-stone-950"
+            >
+              Fix my sync
+            </button>
+            <Link to="/inventory" className="rounded border border-current px-2.5 py-1">
+              Review inventory
+            </Link>
+            <Link to="/settings" className="rounded border border-current px-2.5 py-1">
+              View reliability details
+            </Link>
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(trustSummaryText);
+                showToast("Reliability summary copied.", "success");
+              }}
+              className="rounded border border-current px-2.5 py-1"
+            >
+              Copy summary
+            </button>
+          </div>
         </div>
-      </section>
+      </ExpandableSection>
+
       {isAdmin && (
-        <section className="mt-6 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
-            Live Sales Activity
-          </h2>
-          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            Activity feed freshness: {activityBlockFreshness}
-          </p>
-          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            Use this to see who is actively using the system and how often sales are happening.
-          </p>
+        <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Live sales activity</h2>
+          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Feed freshness: {activityBlockFreshness}</p>
           <div className="mt-3 space-y-2">
             {salesFeed.length ? (
               salesFeed.map((sale) => (
@@ -387,8 +358,8 @@ export default function DashboardPage() {
         </section>
       )}
       {isAdmin && (
-        <section className="mt-6 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Staff Accountability</h2>
+        <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Staff accountability</h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
             Today&apos;s sales by staff with simple accountability metrics.
           </p>
@@ -401,8 +372,8 @@ export default function DashboardPage() {
                 >
                   <p className="font-medium">{staff.sellerName}</p>
                   <p className="text-xs text-stone-500 dark:text-stone-400">
-                    Sales: {formatMoney(staff.total, settings.currencySymbol)} · Transactions: {staff.count} ·
-                    Average: {formatMoney(staff.average, settings.currencySymbol)}
+                    Sales: {formatMoney(staff.total, settings.currencySymbol)} · Transactions: {staff.count} · Average:{" "}
+                    {formatMoney(staff.average, settings.currencySymbol)}
                   </p>
                 </div>
               ))
@@ -413,8 +384,8 @@ export default function DashboardPage() {
         </section>
       )}
       {isAdmin && (
-        <section className="mt-6 rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Daily Close Checklist</h2>
+        <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Daily close checklist</h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
             Confirm today&apos;s totals and close the day with variance flags.
           </p>

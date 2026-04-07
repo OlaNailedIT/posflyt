@@ -121,9 +121,11 @@ async function processSingleTransaction(tx, businessId, userId, payload) {
 
   for (const item of items) {
     const product = productsById.get(item.product_id);
-    if (product.stock < item.quantity) {
-      const error = new Error(`Insufficient stock for product ${product.name}`);
+    const newStock = product.stock - item.quantity;
+    if (newStock < 0) {
+      const error = new Error("INSUFFICIENT_STOCK");
       error.statusCode = 409;
+      error.code = "INSUFFICIENT_STOCK";
       error.location = location;
       throw error;
     }
@@ -256,7 +258,7 @@ async function createTransactionsBulk(businessId, userId, transactions) {
         });
       }
     } catch (error) {
-      if (error.statusCode === 409) {
+      if (error.statusCode === 409 && error.code === "INSUFFICIENT_STOCK") {
         await logAudit({
           businessId,
           userId,
@@ -268,8 +270,8 @@ async function createTransactionsBulk(businessId, userId, transactions) {
         });
       }
       const code =
-        error.statusCode === 409
-          ? "INVENTORY_CONFLICT"
+        error.code === "INSUFFICIENT_STOCK"
+          ? "INSUFFICIENT_STOCK"
           : error.statusCode === 400
             ? "VALIDATION_FAILED"
             : "TRANSIENT_SYNC_FAILURE";

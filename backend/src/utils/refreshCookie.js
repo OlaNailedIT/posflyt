@@ -5,13 +5,18 @@ const {
 } = require("../config/env");
 
 function setRefreshTokenCookie(res, rawRefreshToken) {
-  res.cookie(refreshCookieName, rawRefreshToken, {
+  const options = {
     httpOnly: true,
     secure: nodeEnv === "production",
     sameSite: "lax",
     path: "/",
     maxAge: refreshCookieMaxAgeMs,
-  });
+  };
+  if (nodeEnv === "production" && !options.secure) {
+    // eslint-disable-next-line no-console
+    console.warn("Refresh cookie is not secure in production");
+  }
+  res.cookie(refreshCookieName, rawRefreshToken, options);
 }
 
 function clearRefreshTokenCookie(res) {

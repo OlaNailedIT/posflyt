@@ -4,6 +4,11 @@ import { SYNC_STATUS } from "../constants/syncStatus.js";
 const DB_NAME = "posflyt-offline-db";
 const DB_VERSION = 3;
 
+/** Stop retrying after this many failed sync attempts (per queued row). */
+export const MAX_SYNC_RETRIES = 5;
+
+const STUCK_SYNC_THRESHOLD_MS = 60_000;
+
 const STORES = {
   products: "products",
   dashboard: "dashboard",
@@ -171,6 +176,65 @@ export async function enqueueOutbox(opts) {
   return entry;
 }
 
+/**
+ * Rows left in `syncing` after a tab crash/refresh are marked failed so they can retry.
+ */
+export async function recoverStuckSyncingTransactions() {
+  const db = await getDb();
+  const now = Date.now();
+  const rows = await db.getAll(STORES.transactionsQueue);
+  for (const row of rows) {
+    const s = resolveSyncStatus(row);
+    if (s !== SYNC_STATUS.SYNCING) continue;
+    const last = Number(row.lastSyncAttemptAt ?? row.lastAttemptAt ?? 0);
+    const ageMs = last ? now - last : now - Number(row.createdAt || 0);
+    if (ageMs > STUCK_SYNC_THRESHOLD_MS) {
+      const normalized = normalizeQueuedTransaction(row);
+      await db.put(STORES.transactionsQueue, {
+        ...normalized,
+        status: "failed",
+        syncStatus: SYNC_STATUS.FAILED,
+        syncError: "STUCK_SYNC",
+        lastError: "STUCK_SYNC",
+        lastErrorCode: "STUCK_SYNC",
+        lastAttemptAt: now,
+        lastSyncAttemptAt: now,
+        nextRetryAt: now,
+      });
+    }
+  }
+}
+
+/** Outbox rows stuck in `syncing` (crashed mid-request). */
+export async function recoverStuckSyncingOutbox() {
+  const db = await getDb();
+  const now = Date.now();
+  const rows = await db.getAll(STORES.outbox);
+  for (const row of rows) {
+    if (row.status !== "syncing") continue;
+    const last = Number(row.lastAttemptAt ?? 0);
+    const ageMs = last ? now - last : now - Number(row.createdAt || 0);
+    if (ageMs > STUCK_SYNC_THRESHOLD_MS) {
+      await db.put(STORES.outbox, {
+        ...row,
+        status: "failed",
+        lastError: "STUCK_SYNC",
+        lastErrorCode: "STUCK_SYNC",
+        lastAttemptAt: now,
+        nextRetryAt: now,
+      });
+    }
+  }
+}
+
+export async function clearAllQueues() {
+  const db = await getDb();
+  const tx = db.transaction([STORES.transactionsQueue, STORES.outbox], "readwrite");
+  await tx.objectStore(STORES.transactionsQueue).clear();
+  await tx.objectStore(STORES.outbox).clear();
+  await tx.done;
+}
+
 export async function getQueuedTransactions() {
   const db = await getDb();
   const rows = await db.getAll(STORES.transactionsQueue);
@@ -300,7 +364,25 @@ export async function markQueuedTransactionFailed(id, errorMessage, errorCode = 
   const db = await getDb();
   const row = await db.get(STORES.transactionsQueue, id);
   if (!row) return null;
-  const retryCount = Number(row.retryCount || 0) + 1;
+  const currentRetry = Number(row.retryCount || 0);
+  if (currentRetry >= MAX_SYNC_RETRIES) {
+    const now = Date.now();
+    const next = {
+      ...normalizeQueuedTransaction(row),
+      status: "failed",
+      syncStatus: SYNC_STATUS.FAILED,
+      syncError: "MAX_RETRIES_EXCEEDED",
+      retryCount: currentRetry,
+      lastAttemptAt: now,
+      lastSyncAttemptAt: now,
+      lastError: "MAX_RETRIES_EXCEEDED",
+      lastErrorCode: "MAX_RETRIES_EXCEEDED",
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+    };
+    await db.put(STORES.transactionsQueue, next);
+    return next;
+  }
+  const retryCount = currentRetry + 1;
   const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
   const msg = errorMessage || "Sync failed";
   const now = Date.now();
@@ -340,16 +422,32 @@ export async function markOutboxFailed(id, errorMessage, errorCode = null) {
   const db = await getDb();
   const row = await db.get(STORES.outbox, id);
   if (!row) return null;
-  const retryCount = Number(row.retryCount || 0) + 1;
+  const currentRetry = Number(row.retryCount || 0);
+  if (currentRetry >= MAX_SYNC_RETRIES) {
+    const now = Date.now();
+    const next = {
+      ...row,
+      status: "failed",
+      retryCount: currentRetry,
+      lastAttemptAt: now,
+      lastError: "MAX_RETRIES_EXCEEDED",
+      lastErrorCode: "MAX_RETRIES_EXCEEDED",
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+    };
+    await db.put(STORES.outbox, next);
+    return next;
+  }
+  const retryCount = currentRetry + 1;
   const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
+  const now = Date.now();
   const next = {
     ...row,
     status: "failed",
     retryCount,
-    lastAttemptAt: Date.now(),
+    lastAttemptAt: now,
     lastError: errorMessage || "Sync failed",
     lastErrorCode: errorCode,
-    nextRetryAt: Date.now() + delayMs,
+    nextRetryAt: now + delayMs,
   };
   await db.put(STORES.outbox, next);
   return next;

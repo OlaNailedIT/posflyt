@@ -9,6 +9,7 @@ export default function SyncStatusIndicator() {
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
   const syncing = useOfflineStore((s) => s.syncing);
   const syncProgress = useOfflineStore((s) => s.syncProgress);
+  const lastSuccessfulSyncAt = useOfflineStore((s) => s.lastSuccessfulSyncAt);
 
   const syncingActive = syncing || queueSyncingCount > 0;
   const total = Number(syncProgress?.total || 0);
@@ -31,7 +32,7 @@ export default function SyncStatusIndicator() {
     className =
       "rounded-lg border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-200";
   } else if (failedTransactions > 0) {
-    label = "Sync issues";
+    label = "⚠️ Sync issues detected";
     className =
       "rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200";
   } else if (pendingTransactions > 0) {
@@ -40,5 +41,14 @@ export default function SyncStatusIndicator() {
       "rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200";
   }
 
-  return <span className={className}>{label}</span>;
+  return (
+    <div className="flex flex-col items-end gap-0.5 text-right">
+      <span className={className}>{label}</span>
+      {lastSuccessfulSyncAt != null && (
+        <span className="text-[10px] text-stone-500 dark:text-stone-400">
+          Last synced: {new Date(lastSuccessfulSyncAt).toLocaleTimeString()}
+        </span>
+      )}
+    </div>
+  );
 }

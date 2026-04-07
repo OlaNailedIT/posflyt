@@ -2,10 +2,12 @@ const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { sendOk, sendError } = require("../utils/http");
 
-const issueSchema = z.object({
-  subject: z.string().trim().min(3).max(120),
-  description: z.string().trim().min(5).max(5000),
-});
+const issueSchema = z
+  .object({
+    subject: z.string().trim().min(3).max(120),
+    description: z.string().trim().min(5).max(5000),
+  })
+  .strict();
 
 function getHelp(_req, res) {
   return sendOk(res, {

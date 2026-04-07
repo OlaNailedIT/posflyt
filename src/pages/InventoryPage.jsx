@@ -7,6 +7,7 @@ import { useProducts } from "../hooks/useProducts";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useOfflineStore } from "../stores/offlineStore";
 import { useToastStore } from "../stores/toastStore";
+import { useConflictStore } from "../stores/conflictStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatMoney } from "../utils/currency";
 
@@ -29,8 +30,11 @@ export default function InventoryPage() {
   const { refreshCount } = useOfflineSync();
   const { data: products = [], isLoading, isError } = useProducts();
   const settings = useSettingsStore((s) => s.settings);
+  const pendingConflictIds = useConflictStore((s) => s.pendingConflictIds);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  /** ISO string from server when edit started; required for optimistic concurrency on PUT. */
+  const [editBaselineUpdatedAt, setEditBaselineUpdatedAt] = useState(null);
 
   const createMutation = useMutation({
     mutationFn: (body) => postProduct(body),
@@ -49,16 +53,24 @@ export default function InventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setEditingId(null);
+      setEditBaselineUpdatedAt(null);
       setForm(emptyForm);
       showToast("Product updated.", "success");
     },
     onError: (err) => {
+      if (err.response?.data?.code === "CONFLICT") {
+        void queryClient.invalidateQueries({ queryKey: ["products"] });
+        return;
+      }
       showToast(err.response?.data?.message || "Could not update product.", "error");
     },
   });
 
   const startEdit = (p) => {
     setEditingId(p.id);
+    setEditBaselineUpdatedAt(
+      p.updatedAt ? String(p.updatedAt) : p.createdAt ? String(p.createdAt) : new Date().toISOString()
+    );
     setForm({
       name: p.name,
       sellingPrice: String(p.sellingPrice ?? p.price),
@@ -80,6 +92,14 @@ export default function InventoryPage() {
       lowStockThreshold: Number(form.lowStockThreshold || 10),
     };
     if (form.barcode.trim()) body.barcode = form.barcode.trim();
+
+    if (editingId) {
+      const baseline =
+        editBaselineUpdatedAt ||
+        products.find((x) => x.id === editingId)?.updatedAt ||
+        products.find((x) => x.id === editingId)?.createdAt;
+      body.lastKnownUpdatedAt = baseline ? String(baseline) : new Date().toISOString();
+    }
 
     if (isOnline) {
       if (editingId) {
@@ -122,6 +142,7 @@ export default function InventoryPage() {
     showToast("Saved offline. Will sync when you are back online.", "success");
     setForm(emptyForm);
     setEditingId(null);
+    setEditBaselineUpdatedAt(null);
   };
 
   const busy = createMutation.isPending || updateMutation.isPending;
@@ -214,6 +235,7 @@ export default function InventoryPage() {
               className="rounded-lg border border-stone-300 px-4 py-2 text-stone-800 dark:border-stone-600 dark:text-stone-200"
               onClick={() => {
                 setEditingId(null);
+                setEditBaselineUpdatedAt(null);
                 setForm(emptyForm);
               }}
             >
@@ -266,7 +288,16 @@ export default function InventoryPage() {
             <tbody>
               {products.map((p) => (
                 <tr key={p.id} className="border-t border-stone-200 dark:border-stone-700">
-                  <td className="p-3 font-medium">{p.name}</td>
+                  <td className="p-3 font-medium">
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {p.name}
+                      {pendingConflictIds[p.id] === "product" && (
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                          Conflict
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="p-3">{formatMoney(p.sellingPrice ?? p.price, settings.currencySymbol)}</td>
                   <td className="p-3">{formatMoney(p.costPrice ?? 0, settings.currencySymbol)}</td>
                   <td

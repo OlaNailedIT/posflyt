@@ -21,6 +21,7 @@ import { useCustomers } from "../hooks/useCustomers";
 import ReceiptModal from "../components/pos/ReceiptModal";
 import { calculateTaxTotal } from "../domain/tax";
 import { isRecoverableNetworkError } from "../utils/networkError";
+import { explainSyncError } from "../utils/syncErrorMessages";
 
 function buildCheckoutPayload({
   items,
@@ -139,6 +140,7 @@ export default function PosPage() {
           if (first?.status === "failed") {
             const messageByCode = {
               DUPLICATE_ID: "This sale was already recorded.",
+              INSUFFICIENT_STOCK: "Sale not saved: insufficient stock for this cart.",
               INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
               VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
               TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
@@ -211,32 +213,39 @@ export default function PosPage() {
             {localQueue.map((tx) => (
               <li
                 key={tx.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700"
+                className="flex flex-col gap-1 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700"
               >
-                <div>
-                  <p className="font-mono text-xs text-stone-500 dark:text-stone-400">
-                    {(tx.client_transaction_id || tx.id).slice(0, 8)}…
-                  </p>
-                  <p className="text-sm text-stone-800 dark:text-stone-200">
-                    {formatMoney(Number(tx.payload?.total ?? 0), settings.currencySymbol)}
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-mono text-xs text-stone-500 dark:text-stone-400">
+                      {(tx.client_transaction_id || tx.id).slice(0, 8)}…
+                    </p>
+                    <p className="text-sm text-stone-800 dark:text-stone-200">
+                      {formatMoney(Number(tx.payload?.total ?? 0), settings.currencySymbol)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <TxSyncBadge row={tx} />
+                    {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+                      <button
+                        type="button"
+                        className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 dark:border-red-700 dark:bg-stone-900 dark:text-red-200"
+                        onClick={() =>
+                          void syncSingleTransaction(tx).then(() => {
+                            void loadLocalQueue();
+                          })
+                        }
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <TxSyncBadge row={tx} />
-                  {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
-                    <button
-                      type="button"
-                      className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 dark:border-red-700 dark:bg-stone-900 dark:text-red-200"
-                      onClick={() =>
-                        void syncSingleTransaction(tx).then(() => {
-                          void loadLocalQueue();
-                        })
-                      }
-                    >
-                      Retry
-                    </button>
-                  )}
-                </div>
+                {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+                  <p className="text-xs text-red-700 dark:text-red-300">
+                    {explainSyncError(tx.lastErrorCode || tx.syncError || tx.lastError)}
+                  </p>
+                )}
               </li>
             ))}
           </ul>

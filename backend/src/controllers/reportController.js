@@ -2,10 +2,12 @@ const { z } = require("zod");
 const { getSalesReport } = require("../services/reportService");
 const { sendOk, sendError } = require("../utils/http");
 
-const querySchema = z.object({
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
-});
+const querySchema = z
+  .object({
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .strict();
 
 async function getSales(req, res, next) {
   try {

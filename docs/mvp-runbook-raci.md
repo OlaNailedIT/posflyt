@@ -124,6 +124,18 @@ Track these when closing Phase 6.1 (sync hardening).
 
 **Evidence:** `src/hooks/useOfflineSync.js` (`BATCH_SIZE`, `CONCURRENCY`, `runSync`, `runWithLimit`), `src/services/db.js` (`getPendingQueuedTransactions`, `bumpTransactionRetryNow`, backoff on failure).
 
+### Phase 6.4 — Conflict resolution & data integrity (checklist)
+
+| Done | Item |
+|------|------|
+| [ ] | Conflict strategy defined (ADR 004) |
+| [ ] | `lastKnownUpdatedAt` enforced on product and customer updates |
+| [ ] | Conflict responses returned (`code: CONFLICT`, `data` with server/client timestamps) |
+| [ ] | UI handles conflict errors (refresh messaging + list invalidation) |
+| [ ] | Inventory protected from negative stock (`INSUFFICIENT_STOCK` on oversell) |
+
+**Evidence:** `docs/adr/004-conflict-resolution.md`, `backend/src/services/productService.js`, `backend/src/services/customerService.js`, `backend/src/middlewares/errorHandler.js`, `backend/src/services/transactionService.js`, `src/pages/InventoryPage.jsx`, `src/pages/CustomersPage.jsx`.
+
 ---
 
 ## Revision

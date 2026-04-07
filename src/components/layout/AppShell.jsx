@@ -10,6 +10,8 @@ import { logoutAllDevices } from "../../services/api";
 import { clearSessionCookie } from "../../services/authRefresh";
 import { useToastStore } from "../../stores/toastStore";
 import { CORE_POSITIONING, VALIDATION_MODE } from "../../config/productMode";
+import ConflictResolutionHost from "../ConflictResolutionHost";
+import SyncDebugPanel from "../SyncDebugPanel";
 
 export default function AppShell() {
   const location = useLocation();
@@ -227,6 +229,8 @@ export default function AppShell() {
           {CORE_POSITIONING}
         </div>
         <Outlet />
+        <ConflictResolutionHost />
+        {import.meta.env.DEV && <SyncDebugPanel />}
       </main>
       {mobileMoreOpen && (
         <div

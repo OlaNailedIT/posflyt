@@ -12,17 +12,21 @@ const transactionSchema = z.object({
   created_at: z.string().datetime(),
   items: z
     .array(
-      z.object({
-        product_id: z.string().uuid(),
-        quantity: z.coerce.number().int().positive(),
-      })
+      z
+        .object({
+          product_id: z.string().uuid(),
+          quantity: z.coerce.number().int().positive(),
+        })
+        .strict()
     )
     .min(1),
 }).strict();
 
-const bulkSchema = z.object({
-  transactions: z.array(transactionSchema).min(1),
-});
+const bulkSchema = z
+  .object({
+    transactions: z.array(transactionSchema).min(1),
+  })
+  .strict();
 
 /** ADR 003: attach contract fields without dropping legacy `status`, `receipt`, etc. */
 function augmentSyncResult(result, clientTransactionId) {
@@ -57,6 +61,27 @@ function augmentSyncResult(result, clientTransactionId) {
 
 async function postTransaction(req, res, next) {
   try {
+    if (req.timedout) return;
+
+    if (Array.isArray(req.body?.transactions) && req.body.transactions.length > 50) {
+      return sendError(res, {
+        statusCode: 400,
+        code: "BATCH_TOO_LARGE",
+        message: "Maximum 50 transactions per request",
+        location: "controllers/transactionController.postTransaction",
+        details: { requestId: req.requestId },
+      });
+    }
+    if (Array.isArray(req.body) && req.body.length > 50) {
+      return sendError(res, {
+        statusCode: 400,
+        code: "BATCH_TOO_LARGE",
+        message: "Maximum 50 transactions per request",
+        location: "controllers/transactionController.postTransaction",
+        details: { requestId: req.requestId },
+      });
+    }
+
     const payload = Array.isArray(req.body)
       ? { transactions: req.body }
       : req.body.transactions
@@ -70,6 +95,7 @@ async function postTransaction(req, res, next) {
       logger.info(
         {
           event: "SYNC_ATTEMPT",
+          requestId: req.requestId,
           clientTransactionId: tx.client_transaction_id,
           businessId,
         },
@@ -89,10 +115,12 @@ async function postTransaction(req, res, next) {
 
     for (const r of augmented) {
       if (r.status === "duplicate") {
-        logger.info(
+        logger.warn(
           {
             event: "SYNC_DUPLICATE",
+            requestId: req.requestId,
             clientTransactionId: r.clientTransactionId,
+            businessId,
           },
           "sync duplicate"
         );
@@ -101,7 +129,9 @@ async function postTransaction(req, res, next) {
         logger.info(
           {
             event: "SYNC_SUCCESS",
+            requestId: req.requestId,
             transactionId: tid,
+            businessId,
           },
           "sync success"
         );
@@ -109,6 +139,8 @@ async function postTransaction(req, res, next) {
         logger.error(
           {
             event: "SYNC_ERROR",
+            requestId: req.requestId,
+            businessId,
             error: r.message || "Unknown",
             clientTransactionId: r.clientTransactionId,
           },

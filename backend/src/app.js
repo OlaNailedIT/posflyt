@@ -1,4 +1,4 @@
-const { corsOrigin } = require("./config/env");
+const { corsOrigin, nodeEnv } = require("./config/env");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -23,8 +23,10 @@ const supportRoutes = require("./routes/supportRoutes");
 const systemRoutes = require("./routes/systemRoutes");
 const staffRoutes = require("./routes/staffRoutes");
 const cookieParser = require("cookie-parser");
-const { rateLimit } = require("./middlewares/rateLimit");
-const { requestContext } = require("./middlewares/requestContext");
+const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
+const { attachRequestId } = require("./middlewares/requestId");
+const timeoutMiddleware = require("./middlewares/timeout");
+const { validateJsonContentType } = require("./middlewares/validateJsonContentType");
 const { metricsTracker } = require("./middlewares/metricsTracker");
 const { errorHandler, notFound } = require("./middlewares/errorHandler");
 const prisma = require("./config/prisma");
@@ -34,6 +36,9 @@ const { logger } = require("./utils/logger");
 const PUBLIC_HEALTH_SERVICE_NAME = "posflyt-backend";
 
 const app = express();
+
+app.use(attachRequestId);
+app.use(apiLimiter);
 
 const allowedOriginsList =
   corsOrigin === "*"
@@ -54,11 +59,11 @@ app.use(
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
+    exposedHeaders: ["x-request-id"],
   })
 );
 app.use(cookieParser());
 app.use(helmet());
-app.use(requestContext);
 
 // Public liveness probe: no auth, no JSON/rate-limit/metrics middleware (single /health route in this app).
 app.get("/health", async (req, res) => {
@@ -101,10 +106,44 @@ app.use(
     autoLogging: false,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+app.use(timeoutMiddleware);
+app.use(validateJsonContentType);
+app.use((req, res, next) => {
+  logger.info(
+    {
+      requestId: req.requestId,
+      route: req.originalUrl,
+      method: req.method,
+    },
+    "REQUEST_START"
+  );
+  res.on("finish", () => {
+    logger.info(
+      {
+        requestId: req.requestId,
+        route: req.originalUrl,
+        method: req.method,
+        statusCode: res.statusCode,
+        userId: req.auth?.userId,
+        businessId: req.auth?.businessId,
+      },
+      "REQUEST_COMPLETE"
+    );
+  });
+  next();
+});
 app.use(metricsTracker);
-app.use(rateLimit);
 
+if (nodeEnv !== "production") {
+  const debugRoutes = require("./routes/debugRoutes");
+  const { requireAuth } = require("./middlewares/auth");
+  const { getSyncDiagnostics } = require("./controllers/debugController");
+  app.use("/debug", debugRoutes);
+  app.get("/debug/sync", requireAuth, getSyncDiagnostics);
+}
+
+app.use("/auth", authLimiter);
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
 app.use("/transactions", transactionRoutes);

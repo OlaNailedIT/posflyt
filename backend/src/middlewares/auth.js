@@ -1,6 +1,7 @@
 const { verifyAuthToken } = require("../utils/jwt");
 const { validateSession } = require("../services/sessionService");
 const { sendError } = require("../utils/http");
+const { ERROR_CODES } = require("../utils/errorCodes");
 
 async function requireAuth(req, res, next) {
   try {
@@ -9,7 +10,7 @@ async function requireAuth(req, res, next) {
     if (!token) {
       return sendError(res, {
         statusCode: 401,
-        code: "AUTH_REQUIRED",
+        code: ERROR_CODES.AUTH_REQUIRED,
         message: "Unauthorized: authentication required",
         location: "middlewares/auth.requireAuth",
         details: { requestId: req.requestId },

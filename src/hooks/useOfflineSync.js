@@ -45,6 +45,8 @@ function isTxEligible(row, force, now) {
 
 function isOutboxEligible(row, force, now) {
   if (row.status === "syncing") return false;
+  /** Permanent failure: do not auto-retry; user must resolve in-app while online. */
+  if (row.lastErrorCode === "CONFLICT") return false;
   return force || Number(row.nextRetryAt || 0) <= now;
 }
 
@@ -107,6 +109,13 @@ async function syncOneTransaction(item, onProgress) {
 
   await markQueuedTransactionSyncing(item.id);
   try {
+    if (import.meta.env.DEV) {
+      console.log("Retrying transaction", {
+        id: item.payload?.client_transaction_id,
+        retryCount: item.retryCount,
+        nextRetryAt: item.nextRetryAt,
+      });
+    }
     const response = await postTransaction(payload);
     const first = Array.isArray(response?.results) ? response.results[0] : null;
     if (isAppliedOrDuplicate(first)) {
@@ -118,6 +127,7 @@ async function syncOneTransaction(item, onProgress) {
       const code = first?.code || "TRANSIENT_SYNC_FAILURE";
       const messageByCode = {
         DUPLICATE_ID: "Transaction already synced.",
+        INSUFFICIENT_STOCK: "Sale not synced: insufficient stock. Review inventory and retry.",
         INVENTORY_CONFLICT: "Sale not synced: stock unavailable. Review inventory and retry.",
         VALIDATION_FAILED: "Sale data is invalid. Please retry from POS.",
         TRANSIENT_SYNC_FAILURE: "Temporary sync failure. Retrying automatically.",
@@ -172,6 +182,19 @@ async function syncOneOutbox(item, onProgress) {
     onProgress?.({ doneIncrement: 1, failedIncrement: 0 });
   } catch (error) {
     const code = error.response?.data?.code || null;
+    if (code === "CONFLICT") {
+      await markOutboxFailed(
+        item.id,
+        "Conflict: record changed on server. Open the app while online to resolve.",
+        "CONFLICT"
+      );
+      onProgress?.({
+        doneIncrement: 0,
+        failedIncrement: 1,
+        lastErrorCode: "CONFLICT",
+      });
+      return;
+    }
     onProgress?.({
       doneIncrement: 0,
       failedIncrement: 1,
@@ -193,8 +216,11 @@ export function useOfflineSync() {
   const setSyncProgress = useOfflineStore((s) => s.setSyncProgress);
   const setQueueMeta = useOfflineStore((s) => s.setQueueMeta);
   const setLastSyncedAt = useOfflineStore((s) => s.setLastSyncedAt);
+  const setLastSuccessfulSyncAt = useOfflineStore((s) => s.setLastSuccessfulSyncAt);
   const setLastSyncError = useOfflineStore((s) => s.setLastSyncError);
-  const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
+  const setSyncSession = useOfflineStore((s) => s.setSyncSession);
+  const setSyncSessionProgress = useOfflineStore((s) => s.setSyncSessionProgress);
+  const clearSyncSession = useOfflineStore((s) => s.clearSyncSession);
   const syncing = useOfflineStore((s) => s.syncing);
 
   const refreshCount = useCallback(async () => {
@@ -217,6 +243,10 @@ export function useOfflineSync() {
       .map((item) => Number(item.nextRetryAt || 0))
       .filter((value) => value > 0)
       .sort((a, b) => a - b)[0];
+    const backlogSize = queue.length + outbox.length;
+    if (backlogSize > 50) {
+      console.warn("Large sync backlog", { count: backlogSize });
+    }
     setQueueBreakdown({
       pendingTransactions: activeTx.length + outbox.length,
       queuePendingCount: pendingOnly,
@@ -239,6 +269,7 @@ export function useOfflineSync() {
       const initialTotal = await countEligibleTotal(force);
       if (initialTotal === 0) {
         setSyncProgress({ done: 0, total: 0, failed: 0 });
+        clearSyncSession();
         await refreshCount();
         return;
       }
@@ -248,8 +279,16 @@ export function useOfflineSync() {
       let done = 0;
       let failed = 0;
       setSyncProgress({ done: 0, total: initialTotal || 1, failed: 0, lastErrorCode: null });
+      setSyncSession({
+        startedAt: Date.now(),
+        total: initialTotal,
+        completed: 0,
+      });
 
       try {
+        if (import.meta.env.DEV) {
+          console.log("SYNC_RUN_START", { time: new Date().toISOString() });
+        }
         const maxRounds = 500;
         for (let round = 0; round < maxRounds; round += 1) {
           const batch = await getNextMergedBatch(force);
@@ -264,6 +303,7 @@ export function useOfflineSync() {
               failed,
               lastErrorCode: ev.lastErrorCode ?? null,
             });
+            setSyncSessionProgress(done + failed);
           };
 
           await runWithLimit(
@@ -276,21 +316,45 @@ export function useOfflineSync() {
             CONCURRENCY
           );
 
+          if (import.meta.env.DEV) {
+            console.log("SYNC_BATCH_COMPLETE", { processed: batch.length });
+          }
+
           await refreshCount();
+        }
+
+        if (import.meta.env.DEV) {
+          console.log("SYNC_RUN_END");
         }
 
         await queryClient.invalidateQueries({ queryKey: ["products"] });
         await queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
         await queryClient.invalidateQueries({ queryKey: ["transactions"] });
         await queryClient.invalidateQueries({ queryKey: ["customers"] });
-        setLastSyncedAt(new Date().toISOString());
+        const finishedAt = Date.now();
+        setLastSyncedAt(new Date(finishedAt).toISOString());
+        setLastSuccessfulSyncAt(finishedAt);
       } finally {
         isSyncRunning = false;
         setSyncing(false);
+        clearSyncSession();
         await refreshCount();
       }
     },
-    [queryClient, refreshCount, setLastSyncedAt, setLastSyncError, setQueueBreakdown, setQueueMeta, setSyncing, setSyncProgress]
+    [
+      queryClient,
+      refreshCount,
+      setLastSyncedAt,
+      setLastSuccessfulSyncAt,
+      setLastSyncError,
+      setQueueBreakdown,
+      setQueueMeta,
+      setSyncing,
+      setSyncProgress,
+      setSyncSession,
+      setSyncSessionProgress,
+      clearSyncSession,
+    ]
   );
 
   const runSyncRef = useRef(runSync);
@@ -330,14 +394,15 @@ export function useOfflineSync() {
     return () => window.removeEventListener("online", onOnline);
   }, []);
 
+  /** Watchdog: periodic sync while online (queue may be empty — runSync exits fast). */
   useEffect(() => {
     if (!getStoredAuthTokenSync()) return undefined;
-    if (!isOnline || syncing || pendingTransactions === 0) return undefined;
+    if (!isOnline) return undefined;
     const timer = setInterval(() => {
       void runSyncRef.current(false);
-    }, 10000);
+    }, 30_000);
     return () => clearInterval(timer);
-  }, [isOnline, pendingTransactions, syncing]);
+  }, [isOnline]);
 
   return { syncQueue, refreshCount, isOnline, retryFailedTransactions, syncSingleTransaction };
 }

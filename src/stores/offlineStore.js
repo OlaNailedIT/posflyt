@@ -16,6 +16,10 @@ export const useOfflineStore = create((set) => ({
   queueReplayOrder: "Queued sales and other changes sync in creation order (FIFO).",
   syncing: false,
   syncProgress: { done: 0, total: 0, failed: 0 },
+  /** In-flight sync session (crash-safe queue state is in IndexedDB). */
+  syncSession: { startedAt: null, total: 0, completed: 0 },
+  /** Last successful sync completion time (ms since epoch). */
+  lastSuccessfulSyncAt: null,
   lastSyncedAt: null,
   lastSyncError: null,
   lastSyncCode: null,
@@ -34,6 +38,17 @@ export const useOfflineStore = create((set) => ({
     set({ queueLastAttemptAt, queueNextRetryAt }),
   setSyncing: (syncing) => set({ syncing }),
   setSyncProgress: (syncProgress) => set({ syncProgress }),
+  setSyncSession: (syncSession) => set({ syncSession }),
+  setSyncSessionProgress: (completed) =>
+    set((s) => ({
+      syncSession: {
+        ...s.syncSession,
+        completed: Math.max(0, Number(completed) || 0),
+      },
+    })),
+  clearSyncSession: () =>
+    set({ syncSession: { startedAt: null, total: 0, completed: 0 } }),
+  setLastSuccessfulSyncAt: (lastSuccessfulSyncAt) => set({ lastSuccessfulSyncAt }),
   setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt }),
   setLastSyncError: (lastSyncError, lastSyncCode = null) => set({ lastSyncError, lastSyncCode }),
 }));

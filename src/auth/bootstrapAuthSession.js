@@ -1,4 +1,5 @@
 import { refreshAccessTokenSilently } from "../services/authRefresh";
+import { recoverStuckSyncingOutbox, recoverStuckSyncingTransactions } from "../services/db";
 import { useAuthStore } from "../stores/authStore";
 import { AUTH_TOKEN_KEY, getRefreshTokenSync } from "../utils/authToken";
 
@@ -7,6 +8,13 @@ import { AUTH_TOKEN_KEY, getRefreshTokenSync } from "../utils/authToken";
  * (reduces static token lifetime in storage). If no access token but a refresh token exists, run silent refresh.
  */
 export async function bootstrapAuthSession() {
+  try {
+    await recoverStuckSyncingTransactions();
+    await recoverStuckSyncingOutbox();
+  } catch {
+    // IndexedDB may be unavailable in private mode / quota; auth can still proceed.
+  }
+
   if (typeof localStorage === "undefined") return;
 
   let access = null;

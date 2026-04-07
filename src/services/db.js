@@ -1,7 +1,13 @@
 import { openDB } from "idb";
+import { SYNC_STATUS } from "../constants/syncStatus.js";
 
 const DB_NAME = "posflyt-offline-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+
+/** Stop retrying after this many failed sync attempts (per queued row). */
+export const MAX_SYNC_RETRIES = 5;
+
+const STUCK_SYNC_THRESHOLD_MS = 60_000;
 
 const STORES = {
   products: "products",
@@ -36,10 +42,36 @@ function getDb() {
             db.createObjectStore(STORES.outbox, { keyPath: "id" });
           }
         }
+        // v3: transaction queue rows carry syncStatus / client_transaction_id / syncError (see normalizeQueuedTransaction).
       },
     });
   }
   return dbPromise;
+}
+
+/** Map legacy `status` to SYNC_STATUS (single source of truth is syncStatus when present). */
+export function resolveSyncStatus(row) {
+  if (!row) return SYNC_STATUS.PENDING;
+  if (row.syncStatus) return row.syncStatus;
+  const s = row.status;
+  if (s === "syncing") return SYNC_STATUS.SYNCING;
+  if (s === "failed") return SYNC_STATUS.FAILED;
+  if (s === "synced") return SYNC_STATUS.SYNCED;
+  return SYNC_STATUS.PENDING;
+}
+
+function normalizeQueuedTransaction(row) {
+  if (!row) return row;
+  const syncStatus = row.syncStatus || resolveSyncStatus(row);
+  const client_transaction_id =
+    row.client_transaction_id || row.payload?.client_transaction_id || row.id;
+  return {
+    ...row,
+    syncStatus,
+    client_transaction_id,
+    lastSyncAttemptAt: row.lastSyncAttemptAt ?? row.lastAttemptAt ?? null,
+    syncError: row.syncError ?? row.lastError ?? null,
+  };
 }
 
 export async function saveProducts(products) {
@@ -96,15 +128,20 @@ export async function enqueueTransaction(transactionPayload) {
   const id =
     transactionPayload?.client_transaction_id ||
     `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const client_transaction_id = transactionPayload?.client_transaction_id || id;
   const entry = {
     id,
+    client_transaction_id,
     payload: transactionPayload,
     createdAt: Date.now(),
     status: "pending",
+    syncStatus: SYNC_STATUS.PENDING,
     retryCount: 0,
     lastError: null,
     lastErrorCode: null,
     lastAttemptAt: null,
+    lastSyncAttemptAt: null,
+    syncError: null,
     nextRetryAt: Date.now(),
   };
   await db.put(STORES.transactionsQueue, entry);
@@ -139,10 +176,101 @@ export async function enqueueOutbox(opts) {
   return entry;
 }
 
+/**
+ * Rows left in `syncing` after a tab crash/refresh are marked failed so they can retry.
+ */
+export async function recoverStuckSyncingTransactions() {
+  const db = await getDb();
+  const now = Date.now();
+  const rows = await db.getAll(STORES.transactionsQueue);
+  for (const row of rows) {
+    const s = resolveSyncStatus(row);
+    if (s !== SYNC_STATUS.SYNCING) continue;
+    const last = Number(row.lastSyncAttemptAt ?? row.lastAttemptAt ?? 0);
+    const ageMs = last ? now - last : now - Number(row.createdAt || 0);
+    if (ageMs > STUCK_SYNC_THRESHOLD_MS) {
+      const normalized = normalizeQueuedTransaction(row);
+      await db.put(STORES.transactionsQueue, {
+        ...normalized,
+        status: "failed",
+        syncStatus: SYNC_STATUS.FAILED,
+        syncError: "STUCK_SYNC",
+        lastError: "STUCK_SYNC",
+        lastErrorCode: "STUCK_SYNC",
+        lastAttemptAt: now,
+        lastSyncAttemptAt: now,
+        nextRetryAt: now,
+      });
+    }
+  }
+}
+
+/** Outbox rows stuck in `syncing` (crashed mid-request). */
+export async function recoverStuckSyncingOutbox() {
+  const db = await getDb();
+  const now = Date.now();
+  const rows = await db.getAll(STORES.outbox);
+  for (const row of rows) {
+    if (row.status !== "syncing") continue;
+    const last = Number(row.lastAttemptAt ?? 0);
+    const ageMs = last ? now - last : now - Number(row.createdAt || 0);
+    if (ageMs > STUCK_SYNC_THRESHOLD_MS) {
+      await db.put(STORES.outbox, {
+        ...row,
+        status: "failed",
+        lastError: "STUCK_SYNC",
+        lastErrorCode: "STUCK_SYNC",
+        lastAttemptAt: now,
+        nextRetryAt: now,
+      });
+    }
+  }
+}
+
+export async function clearAllQueues() {
+  const db = await getDb();
+  const tx = db.transaction([STORES.transactionsQueue, STORES.outbox], "readwrite");
+  await tx.objectStore(STORES.transactionsQueue).clear();
+  await tx.objectStore(STORES.outbox).clear();
+  await tx.done;
+}
+
 export async function getQueuedTransactions() {
   const db = await getDb();
   const rows = await db.getAll(STORES.transactionsQueue);
-  return rows.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const normalized = rows.map(normalizeQueuedTransaction);
+  return normalized.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+}
+
+export async function getFailedQueuedTransactions() {
+  const rows = await getQueuedTransactions();
+  return rows.filter((r) => resolveSyncStatus(r) === SYNC_STATUS.FAILED);
+}
+
+/** Eligible transaction rows for sync (not synced, not syncing; respects nextRetryAt unless caller uses force in hook). */
+export async function getPendingQueuedTransactions() {
+  const rows = await getQueuedTransactions();
+  const now = Date.now();
+  return rows.filter((r) => {
+    const s = resolveSyncStatus(r);
+    if (s === SYNC_STATUS.SYNCED || s === SYNC_STATUS.SYNCING) return false;
+    if (s === SYNC_STATUS.FAILED) return Number(r.nextRetryAt || 0) <= now;
+    if (s === SYNC_STATUS.PENDING) return Number(r.nextRetryAt || 0) <= now;
+    return false;
+  });
+}
+
+/** Manual retry: make row eligible for the next sync pass. */
+export async function bumpTransactionRetryNow(id) {
+  const db = await getDb();
+  const row = await db.get(STORES.transactionsQueue, id);
+  if (!row) return null;
+  const next = {
+    ...normalizeQueuedTransaction(row),
+    nextRetryAt: Date.now(),
+  };
+  await db.put(STORES.transactionsQueue, next);
+  return next;
 }
 
 export async function getQueuedOutbox() {
@@ -180,12 +308,52 @@ export async function markQueuedTransactionSyncing(id) {
   const db = await getDb();
   const row = await db.get(STORES.transactionsQueue, id);
   if (!row) return null;
+  const now = Date.now();
   const next = {
-    ...row,
+    ...normalizeQueuedTransaction(row),
     status: "syncing",
-    lastAttemptAt: Date.now(),
+    syncStatus: SYNC_STATUS.SYNCING,
+    lastAttemptAt: now,
+    lastSyncAttemptAt: now,
     lastError: null,
     lastErrorCode: null,
+    syncError: null,
+    nextRetryAt: now,
+  };
+  await db.put(STORES.transactionsQueue, next);
+  return next;
+}
+
+export async function markQueuedTransactionSynced(id) {
+  const db = await getDb();
+  const row = await db.get(STORES.transactionsQueue, id);
+  if (!row) return null;
+  const now = Date.now();
+  const next = {
+    ...normalizeQueuedTransaction(row),
+    status: "synced",
+    syncStatus: SYNC_STATUS.SYNCED,
+    syncError: null,
+    lastError: null,
+    lastErrorCode: null,
+    lastSyncAttemptAt: now,
+    lastAttemptAt: now,
+    nextRetryAt: now,
+  };
+  await db.put(STORES.transactionsQueue, next);
+  return next;
+}
+
+/** Keep queued while offline or flaky network: revert to pending (not failed). */
+export async function markQueuedTransactionPending(id, message = null) {
+  const db = await getDb();
+  const row = await db.get(STORES.transactionsQueue, id);
+  if (!row) return null;
+  const next = {
+    ...normalizeQueuedTransaction(row),
+    status: "pending",
+    syncStatus: SYNC_STATUS.PENDING,
+    syncError: message || null,
     nextRetryAt: Date.now(),
   };
   await db.put(STORES.transactionsQueue, next);
@@ -196,17 +364,39 @@ export async function markQueuedTransactionFailed(id, errorMessage, errorCode = 
   const db = await getDb();
   const row = await db.get(STORES.transactionsQueue, id);
   if (!row) return null;
-  const retryCount = Number(row.retryCount || 0) + 1;
-  const jitter = Math.floor(Math.random() * 1500);
-  const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(retryCount - 1, 5))) + jitter;
+  const currentRetry = Number(row.retryCount || 0);
+  if (currentRetry >= MAX_SYNC_RETRIES) {
+    const now = Date.now();
+    const next = {
+      ...normalizeQueuedTransaction(row),
+      status: "failed",
+      syncStatus: SYNC_STATUS.FAILED,
+      syncError: "MAX_RETRIES_EXCEEDED",
+      retryCount: currentRetry,
+      lastAttemptAt: now,
+      lastSyncAttemptAt: now,
+      lastError: "MAX_RETRIES_EXCEEDED",
+      lastErrorCode: "MAX_RETRIES_EXCEEDED",
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+    };
+    await db.put(STORES.transactionsQueue, next);
+    return next;
+  }
+  const retryCount = currentRetry + 1;
+  const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
+  const msg = errorMessage || "Sync failed";
+  const now = Date.now();
   const next = {
-    ...row,
+    ...normalizeQueuedTransaction(row),
     status: "failed",
+    syncStatus: SYNC_STATUS.FAILED,
+    syncError: msg,
     retryCount,
-    lastAttemptAt: Date.now(),
-    lastError: errorMessage || "Sync failed",
+    lastAttemptAt: now,
+    lastSyncAttemptAt: now,
+    lastError: msg,
     lastErrorCode: errorCode,
-    nextRetryAt: Date.now() + delayMs,
+    nextRetryAt: now + delayMs,
   };
   await db.put(STORES.transactionsQueue, next);
   return next;
@@ -232,17 +422,32 @@ export async function markOutboxFailed(id, errorMessage, errorCode = null) {
   const db = await getDb();
   const row = await db.get(STORES.outbox, id);
   if (!row) return null;
-  const retryCount = Number(row.retryCount || 0) + 1;
-  const jitter = Math.floor(Math.random() * 1500);
-  const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(retryCount - 1, 5))) + jitter;
+  const currentRetry = Number(row.retryCount || 0);
+  if (currentRetry >= MAX_SYNC_RETRIES) {
+    const now = Date.now();
+    const next = {
+      ...row,
+      status: "failed",
+      retryCount: currentRetry,
+      lastAttemptAt: now,
+      lastError: "MAX_RETRIES_EXCEEDED",
+      lastErrorCode: "MAX_RETRIES_EXCEEDED",
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+    };
+    await db.put(STORES.outbox, next);
+    return next;
+  }
+  const retryCount = currentRetry + 1;
+  const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
+  const now = Date.now();
   const next = {
     ...row,
     status: "failed",
     retryCount,
-    lastAttemptAt: Date.now(),
+    lastAttemptAt: now,
     lastError: errorMessage || "Sync failed",
     lastErrorCode: errorCode,
-    nextRetryAt: Date.now() + delayMs,
+    nextRetryAt: now + delayMs,
   };
   await db.put(STORES.outbox, next);
   return next;

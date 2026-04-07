@@ -7,6 +7,7 @@ import { useToastStore } from "../stores/toastStore";
 import ExpandableSection from "../components/ui/ExpandableSection";
 import { VALIDATION_MODE } from "../config/productMode";
 import { useReliabilitySummary } from "../hooks/useSystem";
+import { clearAllQueues } from "../services/db";
 
 const currencyOptions = [
   { code: "USD", symbol: "$" },
@@ -53,6 +54,7 @@ export default function SettingsPage() {
   const syncing = useOfflineStore((s) => s.syncing);
   const syncProgress = useOfflineStore((s) => s.syncProgress);
   const lastSyncedAt = useOfflineStore((s) => s.lastSyncedAt);
+  const lastSuccessfulSyncAt = useOfflineStore((s) => s.lastSuccessfulSyncAt);
   const { syncQueue } = useOfflineSync();
   const { data: reliability } = useReliabilitySummary(true);
   const showToast = useToastStore((s) => s.showToast);
@@ -126,7 +128,7 @@ export default function SettingsPage() {
     if (!isOnline) return;
     await syncQueue(true);
   };
-  const syncSummary = `POSflyt Sync Update: Pending ${pendingTransactions}, Failed ${failedTransactions}, Duplicates prevented ${reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}, Last synced ${lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : "Not yet"}, Reconciliation: ${reliability?.lastReconciliationStatus || "Unknown"}.`;
+  const syncSummary = `POSflyt Sync Update: Pending ${pendingTransactions}, Failed ${failedTransactions}, Duplicates prevented ${reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}, Last synced ${lastSuccessfulSyncAt != null ? new Date(lastSuccessfulSyncAt).toLocaleString() : lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : "Not yet"}, Reconciliation: ${reliability?.lastReconciliationStatus || "Unknown"}.`;
 
   return (
     <section className="space-y-4">
@@ -275,7 +277,7 @@ export default function SettingsPage() {
                 Sync progress: {syncProgress.done}/{syncProgress.total}
               </span>
             )}
-            <span>Your data is محفوظ and backed up.</span>
+            <span>Your data is saved locally and backed up when sync completes.</span>
             <button
               type="button"
               onClick={onSyncNow}
@@ -294,6 +296,24 @@ export default function SettingsPage() {
             >
               Copy summary
             </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!window.confirm("Reset all pending sync data? This clears queued sales and offline product/customer changes.")) {
+                  return;
+                }
+                try {
+                  await clearAllQueues();
+                  showToast("Sync queues cleared. Reloading…", "success");
+                  window.setTimeout(() => window.location.reload(), 300);
+                } catch {
+                  showToast("Could not reset sync data.", "error");
+                }
+              }}
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm text-red-900 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+            >
+              Reset sync data
+            </button>
           </div>
           <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
             {queueReplayOrder} {queueLastAttemptAt ? `Last retry: ${new Date(queueLastAttemptAt).toLocaleString()}.` : ""}
@@ -301,7 +321,9 @@ export default function SettingsPage() {
           </p>
           {failedTransactions > 0 && (
             <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-              {lastSyncCode === "INVENTORY_CONFLICT" || lastSyncError?.toLowerCase().includes("stock unavailable")
+              {lastSyncCode === "INSUFFICIENT_STOCK" ||
+              lastSyncCode === "INVENTORY_CONFLICT" ||
+              lastSyncError?.toLowerCase().includes("stock unavailable")
                 ? "Some sales failed due to stock conflict. Update stock, then tap Sync Now."
                 : lastSyncCode === "VALIDATION_FAILED"
                   ? "Some sales need correction. Re-open POS and resubmit the failed sale."

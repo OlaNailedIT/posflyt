@@ -135,6 +135,7 @@ async function getReliabilitySummary(req, res, next) {
       stockMismatchWarningCount: warningMismatches,
       stockMismatchCriticalCount: criticalMismatches,
       api5xxCount: runtime.api5xxCount,
+      eventLoopDelayMeanSeconds: runtime.eventLoopDelayMeanSeconds,
       averageSyncRetryResolutionTimeMs:
         retryResolutionFromLogsAvg ?? runtime.averageSyncRetryResolutionTimeMs ?? null,
       openSyncFailures: inventoryConflicts,

@@ -1,8 +1,15 @@
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { postTransaction } from "../services/api";
-import { enqueueOutbox, enqueueTransaction, upsertCustomerInCache } from "../services/db";
+import { SYNC_STATUS } from "../constants/syncStatus";
+import {
+  enqueueOutbox,
+  enqueueTransaction,
+  getQueuedTransactions,
+  resolveSyncStatus,
+  upsertCustomerInCache,
+} from "../services/db";
 import { useCartStore } from "../stores/cartStore";
 import { useProducts } from "../hooks/useProducts";
 import { useOfflineStore } from "../stores/offlineStore";
@@ -14,6 +21,7 @@ import { useCustomers } from "../hooks/useCustomers";
 import ReceiptModal from "../components/pos/ReceiptModal";
 import { calculateTaxTotal } from "../domain/tax";
 import { isRecoverableNetworkError } from "../utils/networkError";
+import { explainSyncError } from "../utils/syncErrorMessages";
 
 function buildCheckoutPayload({
   items,
@@ -42,6 +50,29 @@ const input =
 const lineItem =
   "rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-950";
 
+function TxSyncBadge({ row }) {
+  const s = resolveSyncStatus(row);
+  const styles = {
+    [SYNC_STATUS.PENDING]: "bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-200",
+    [SYNC_STATUS.SYNCING]: "bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100",
+    [SYNC_STATUS.SYNCED]: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-100",
+    [SYNC_STATUS.FAILED]: "bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-100",
+  };
+  const labels = {
+    [SYNC_STATUS.PENDING]: "Pending",
+    [SYNC_STATUS.SYNCING]: "Syncing...",
+    [SYNC_STATUS.SYNCED]: "Synced",
+    [SYNC_STATUS.FAILED]: "Failed (Tap to retry)",
+  };
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-xs font-medium ${styles[s] || styles[SYNC_STATUS.PENDING]}`}
+    >
+      {labels[s] || "Pending"}
+    </span>
+  );
+}
+
 export default function PosPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -53,9 +84,24 @@ export default function PosPage() {
   const { data: products = [], isLoading } = useProducts();
   const { data: customers = [], addCustomer } = useCustomers();
   const isOnline = useOfflineStore((s) => s.isOnline);
+  const syncing = useOfflineStore((s) => s.syncing);
   const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
-  const { refreshCount } = useOfflineSync();
+  const { refreshCount, syncSingleTransaction } = useOfflineSync();
+  const [localQueue, setLocalQueue] = useState([]);
+
+  const loadLocalQueue = useCallback(async () => {
+    const rows = await getQueuedTransactions();
+    setLocalQueue(
+      [...rows]
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+        .slice(0, 12)
+    );
+  }, []);
+
+  useEffect(() => {
+    void loadLocalQueue();
+  }, [loadLocalQueue, pendingTransactions, failedTransactions, syncing]);
 
   const items = useCartStore((s) => s.items);
   const addToCart = useCartStore((s) => s.addToCart);
@@ -94,6 +140,7 @@ export default function PosPage() {
           if (first?.status === "failed") {
             const messageByCode = {
               DUPLICATE_ID: "This sale was already recorded.",
+              INSUFFICIENT_STOCK: "Sale not saved: insufficient stock for this cart.",
               INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
               VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
               TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
@@ -109,6 +156,7 @@ export default function PosPage() {
           if (isRecoverableNetworkError(error)) {
             await enqueueTransaction(payload);
             await refreshCount();
+            await loadLocalQueue();
             showToast(
               "Connection unstable. Sale saved locally and will sync when the network is available.",
               "success"
@@ -121,6 +169,7 @@ export default function PosPage() {
       } else {
         await enqueueTransaction(payload);
         await refreshCount();
+        await loadLocalQueue();
         showToast("Saved offline. Will sync when you are back online.", "success");
         clearCart();
       }
@@ -145,11 +194,62 @@ export default function PosPage() {
       )}
       {(pendingTransactions > 0 || failedTransactions > 0) && (
         <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
-          Queue: {pendingTransactions} pending, {failedTransactions} failed.{" "}
+          Queue: {pendingTransactions} active, {failedTransactions} failed.{" "}
           <Link to="/settings" className="underline">
             Open Sync Controls
           </Link>
         </p>
+      )}
+
+      {localQueue.length > 0 && (
+        <div className={`${card} mt-4`}>
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
+            Local sale queue
+          </h2>
+          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+            Status for each sale saved on this device (including synced copies kept for visibility).
+          </p>
+          <ul className="mt-3 space-y-2">
+            {localQueue.map((tx) => (
+              <li
+                key={tx.id}
+                className="flex flex-col gap-1 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-mono text-xs text-stone-500 dark:text-stone-400">
+                      {(tx.client_transaction_id || tx.id).slice(0, 8)}…
+                    </p>
+                    <p className="text-sm text-stone-800 dark:text-stone-200">
+                      {formatMoney(Number(tx.payload?.total ?? 0), settings.currencySymbol)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <TxSyncBadge row={tx} />
+                    {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+                      <button
+                        type="button"
+                        className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 dark:border-red-700 dark:bg-stone-900 dark:text-red-200"
+                        onClick={() =>
+                          void syncSingleTransaction(tx).then(() => {
+                            void loadLocalQueue();
+                          })
+                        }
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+                  <p className="text-xs text-red-700 dark:text-red-300">
+                    {explainSyncError(tx.lastErrorCode || tx.syncError || tx.lastError)}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

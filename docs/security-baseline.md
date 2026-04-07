@@ -26,9 +26,20 @@ Current baseline:
 - [ ] Rotation cadence defined (90 days baseline).
 - [ ] Emergency rotation runbook known by on-call owner.
 
+## Phase 7.2 additions
+
+- **Input sanitization** for user-supplied text stored in DB (`backend/src/utils/sanitize.js`).
+- **Security audit events**: failed password login (`AUTH_LOGIN_FAILED_INVALID_PASSWORD`); unknown-email attempts logged via structured logger (no DB row without `businessId`).
+- **Helmet**: explicit production HSTS, referrer policy, cross-domain Flash/Silverlight policies disabled, `CORP` for API+CORS.
+- **Frontend CSP** (Vercel): `vercel.json` security headers; React remains default-safe for XSS.
+- **CI**: backend `npm audit --audit-level=high` required; frontend audit runs as informational when upstream has advisories.
+
+See **`docs/phase-7.2-security-compliance.md`** for the full Phase 7.2 narrative.
+
 ## Verification Checklist
 
 1. Repeated login attempts trigger rate limiting.
 2. CORS headers match expected staging/production origins.
 3. Helmet headers are present in runtime responses.
 4. No hardcoded secrets appear in code review scans.
+5. CSP and security headers present on frontend host (see `vercel.json`).

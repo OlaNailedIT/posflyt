@@ -96,6 +96,8 @@ jobs:
           npx prisma migrate deploy
       - name: Run backend unit tests
         run: npm test
+      - name: npm audit (backend dependencies)
+        run: npm audit --audit-level=high
 
   backend-integration:
     name: Backend Integration Tests
@@ -156,6 +158,9 @@ jobs:
         run: npm ci
       - name: Build frontend
         run: npm run build
+      - name: npm audit (frontend — informational if upstream advisories exist)
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
   smoke-tests:
     name: Browser Smoke Tests

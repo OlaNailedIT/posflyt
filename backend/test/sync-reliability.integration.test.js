@@ -58,6 +58,8 @@ test("transaction idempotency + stock integrity", async () => {
   assert.equal(first.body.data.synced, 1);
   assert.equal(first.body.data.duplicates, 0);
   assert.equal(first.body.data.failed, 0);
+  assert.equal(first.body.data.syncStatus, "applied");
+  assert.equal(first.body.data.clientTransactionId, txId);
 
   const duplicate = await request(app)
     .post("/transactions")
@@ -67,6 +69,7 @@ test("transaction idempotency + stock integrity", async () => {
   assert.equal(duplicate.body.data.synced, 0);
   assert.equal(duplicate.body.data.duplicates, 1);
   assert.equal(duplicate.body.data.failed, 0);
+  assert.equal(duplicate.body.data.syncStatus, "duplicate");
 
   const list = await request(app).get("/transactions").set("Authorization", `Bearer ${token}`);
   assert.equal(list.status, 200);
@@ -87,4 +90,17 @@ test("transaction idempotency + stock integrity", async () => {
 
   const product = await prisma.product.findUnique({ where: { id: productId } });
   assert.equal(product.stock, 0);
+});
+
+test("POST /transactions rejects invalid body with standard error envelope", async () => {
+  const bad = await request(app)
+    .post("/transactions")
+    .set("Authorization", `Bearer ${token}`)
+    .send({ items: [{ product_id: productId, quantity: 1 }] });
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.status, "error");
+  assert.equal(bad.body.code, "VALIDATION_FAILED");
+  assert.ok(typeof bad.body.message === "string");
+  assert.ok(bad.body.data && typeof bad.body.data === "object");
+  assert.ok(Array.isArray(bad.body.data.details?.errors));
 });

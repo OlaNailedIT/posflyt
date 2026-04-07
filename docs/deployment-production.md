@@ -28,6 +28,7 @@ CI does **not** run migrations against production. CI applies the same migration
 | `SENTRY_RELEASE` | Optional | Git SHA or semver; must match uploaded source maps if used. |
 | `PAYSTACK_SECRET_KEY` | If billing | |
 | `PAYSTACK_WEBHOOK_SECRET` | If webhooks | Verify HMAC on webhook body. |
+| `TRUST_PROXY` | Recommended behind LB | Set `1` (or hop count) when the API is behind a reverse proxy / load balancer so `express-rate-limit` and `req.ip` reflect the real client (`X-Forwarded-For`). Omit locally. |
 
 **Consistency checklist:** `DATABASE_URL` and `JWT_SECRET` on the host must match what you expect (wrong URL → connection errors; wrong secret → invalid tokens after deploy). `CORS_ORIGIN` must list the **exact** browser origin of the SPA (scheme + host, no trailing path).
 
@@ -63,10 +64,23 @@ CI does **not** run migrations against production. CI applies the same migration
 - **`GET /health`** — Single canonical liveness route (defined in `app.js` before JSON/rate-limit middleware). **No auth.** On success: `{ "status": "ok", "data": { "service": "posflyt-backend", "database": "connected" } }`. On DB failure: HTTP **503**, `{ "status": "error", "data": { "service": "posflyt-backend", "database": "disconnected" } }`. Uses `SELECT 1` for the DB check.
 - **`GET /system/health`** — Separate path (not a duplicate of `/health`); optional richer payload for ops. Also public in the current app; prefer **`GET /health`** for uptime monitors.
 
+## Horizontal scaling (Phase 7.4)
+
+- Run **multiple** backend instances with the **same** `DATABASE_URL`, `JWT_SECRET`, and CORS settings. Sessions are **not** stored in memory on the instance.
+- Configure **`TRUST_PROXY=1`** (or the number of proxy layers) on each instance so per-IP rate limits and logging are correct behind Render, ALB, or similar.
+- Point load balancer health checks at **`GET /health`**; use **503** responses as “unhealthy” for the pool.
+
 ## Neon / network
 
 - Local dev may fail to reach Neon **direct** (`P1001`); use the **pooler** URL from the Neon console.
 - Avoid ad-hoc `db push` against production; use `migrate deploy` as above.
+
+## Disaster recovery and continuity (Phase 7.6)
+
+- **RTO/RPO:** Define and approve targets per component; use the template in [`phase-7.6-disaster-recovery-bc.md`](./phase-7.6-disaster-recovery-bc.md).
+- **Database:** Rely on **Neon** backups and PITR for authoritative recovery; validate with periodic restore drills to a non-production database.
+- **Application JSON backups** (`backupService`, under `backups/`): supplementary; on ephemeral hosts treat as **non-durable** unless copied to object storage.
+- **Failover signals:** `GET /health` (503 when DB down), alerts from Phase 7.5, provider status pages.
 
 ## Paystack webhooks (MVP)
 

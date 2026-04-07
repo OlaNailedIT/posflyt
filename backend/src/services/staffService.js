@@ -3,6 +3,7 @@ const prisma = require("../config/prisma");
 const { hashPassword } = require("../utils/password");
 const { logAudit } = require("./auditService");
 const { revokeAllUserSessions } = require("./sessionService");
+const { sanitizeDisplayName, normalizeEmail } = require("../utils/sanitize");
 
 async function getStaffDisabledMap(businessId) {
   const logs = await prisma.auditLog.findMany({
@@ -126,7 +127,9 @@ async function reactivateStaff(businessId, staffUserId, payload, actingUserId) {
 }
 
 async function createStaff(businessId, payload, createdByUserId) {
-  const existing = await prisma.user.findUnique({ where: { email: payload.email } });
+  const safeEmail = normalizeEmail(payload.email);
+  const safeName = sanitizeDisplayName(payload.name, 120);
+  const existing = await prisma.user.findUnique({ where: { email: safeEmail } });
   if (existing) {
     const error = new Error("Email already in use");
     error.statusCode = 409;
@@ -139,8 +142,8 @@ async function createStaff(businessId, payload, createdByUserId) {
   const user = await prisma.user.create({
     data: {
       businessId,
-      name: payload.name,
-      email: payload.email,
+      name: safeName,
+      email: safeEmail,
       password,
       role: payload.role,
     },

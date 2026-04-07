@@ -1,5 +1,4 @@
 const { sendError } = require("../utils/http");
-const { incrementApi5xx } = require("../services/runtimeMetricsService");
 const { logger } = require("../utils/logger");
 const { captureException } = require("../utils/sentry");
 
@@ -18,20 +17,41 @@ function errorHandler(err, req, res, _next) {
   const code = err.code || (status >= 500 ? "INTERNAL_ERROR" : "REQUEST_FAILED");
   const message = err.message || "Internal Server Error";
   const location = err.location || "middlewares/errorHandler.errorHandler";
-  if (status >= 500) incrementApi5xx();
-  logger.error({
-    status,
+
+  const log = req.log || logger;
+  const logBase = {
+    event: "API_ERROR",
     code,
     message,
-    location,
-    requestId: req.requestId,
-  }, "Unhandled API error");
-  captureException(err, {
-    requestId: req.requestId,
-    code,
-    location,
-    userId: req.user?.id,
-  });
+    route: req.originalUrl,
+    userId: req.auth?.userId,
+    businessId: req.auth?.businessId,
+  };
+
+  if (code === "CONFLICT" && err.conflictData) {
+    log.warn(logBase, "API error response");
+    return sendError(res, {
+      statusCode: 409,
+      code: "CONFLICT",
+      message: message || "Record has been updated by another source",
+      location,
+      details: { requestId: req.requestId },
+      data: err.conflictData,
+    });
+  }
+
+  if (status < 500) {
+    log.warn(logBase, "API error response");
+  } else {
+    log.error({ ...logBase, status, location }, "Unhandled API error");
+    captureException(err, {
+      requestId: req.requestId,
+      code,
+      location,
+      userId: req.auth?.userId,
+    });
+  }
+
   return sendError(res, {
     statusCode: status,
     code,

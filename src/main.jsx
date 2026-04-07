@@ -18,7 +18,7 @@ import { useAuthStore } from "./stores/authStore";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 1000 * 30,
+      staleTime: 1000 * 45,
       refetchOnWindowFocus: false,
       retry: 1,
     },

@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { logAudit } = require("./auditService");
+const { sanitizeDisplayName, normalizeEmail, sanitizePlainText } = require("../utils/sanitize");
 
 const DEFAULT_SETTINGS = {
   currencySymbol: "$",
@@ -22,20 +23,22 @@ function sanitizeSettingsPayload(payload = {}) {
   return {
     currencySymbol:
       typeof payload.currencySymbol === "string" && payload.currencySymbol.trim()
-        ? payload.currencySymbol.trim()
+        ? sanitizePlainText(payload.currencySymbol.trim(), 8)
         : undefined,
     taxEnabled: typeof payload.taxEnabled === "boolean" ? payload.taxEnabled : undefined,
     taxRate: typeof payload.taxRate === "number" ? payload.taxRate : undefined,
     businessName:
       typeof payload.businessName === "string" && payload.businessName.trim()
-        ? payload.businessName.trim()
+        ? sanitizeDisplayName(payload.businessName, 120)
         : undefined,
     businessEmail:
       typeof payload.businessEmail === "string" && payload.businessEmail.trim()
-        ? payload.businessEmail.trim()
+        ? normalizeEmail(payload.businessEmail)
         : undefined,
     businessPhone:
-      typeof payload.businessPhone === "string" ? payload.businessPhone.trim() : undefined,
+      typeof payload.businessPhone === "string"
+        ? sanitizePlainText(payload.businessPhone, 30)
+        : undefined,
   };
 }
 

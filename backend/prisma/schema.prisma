@@ -43,6 +43,8 @@ model User {
   issues         IssueReport[]
   transactions   Transaction[]
   business       Business        @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
 }
 
 model RefreshToken {
@@ -67,6 +69,8 @@ model Store {
   products     Product[]
   business     Business      @relation(fields: [businessId], references: [id])
   transactions Transaction[]
+
+  @@index([businessId])
 }
 
 model Product {
@@ -85,6 +89,8 @@ model Product {
   business          Business          @relation(fields: [businessId], references: [id])
   store             Store?            @relation(fields: [storeId], references: [id])
   transactionItems  TransactionItem[]
+
+  @@index([businessId])
 }
 
 model Customer {
@@ -93,9 +99,12 @@ model Customer {
   email        String?
   phone        String?
   createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   businessId   String
   business     Business      @relation(fields: [businessId], references: [id])
   transactions Transaction[]
+
+  @@index([businessId])
 }
 
 model Transaction {
@@ -114,6 +123,10 @@ model Transaction {
   store         Store?            @relation(fields: [storeId], references: [id])
   user          User              @relation(fields: [userId], references: [id])
   items         TransactionItem[]
+
+  // client_transaction_id is stored as `id`; idempotency scoped to business (ADR 003).
+  @@unique([id, businessId], name: "client_transaction_id_business_id")
+  @@index([businessId, createdAt(sort: Desc)])
 }
 
 model TransactionItem {
@@ -124,6 +137,9 @@ model TransactionItem {
   productId     String
   product       Product     @relation(fields: [productId], references: [id])
   transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId])
+  @@index([productId])
 }
 
 model Settings {
@@ -181,6 +197,7 @@ model SmartAlert {
   business   Business  @relation(fields: [businessId], references: [id])
 
   @@unique([businessId, type, alertDate])
+  @@index([businessId])
 }
 
 model PaymentHistory {
@@ -195,6 +212,8 @@ model PaymentHistory {
   createdAt   DateTime         @default(now())
   businessId  String
   business    Business         @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
 }
 
 model ActiveSession {
@@ -207,6 +226,8 @@ model ActiveSession {
   revokedAt  DateTime?
   userId     String
   user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 model AuditLog {
@@ -218,6 +239,8 @@ model AuditLog {
   userId     String?
   business   Business @relation(fields: [businessId], references: [id])
   user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([businessId, createdAt(sort: Desc)])
 }
 
 model BackupRecord {
@@ -228,6 +251,8 @@ model BackupRecord {
   createdAt  DateTime @default(now())
   businessId String
   business   Business @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
 }
 
 model IssueReport {
@@ -240,6 +265,8 @@ model IssueReport {
   userId      String?
   business    Business @relation(fields: [businessId], references: [id])
   user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([businessId])
 }
 
 enum Role {

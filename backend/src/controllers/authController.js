@@ -5,20 +5,25 @@ const { sendOk, sendError } = require("../utils/http");
 const { setRefreshTokenCookie, clearRefreshTokenCookie } = require("../utils/refreshCookie");
 const { refreshCookieName } = require("../config/env");
 
-const registerSchema = z.object({
-  businessName: z.string().min(2),
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(6),
-});
+const registerSchema = z
+  .object({
+    businessName: z.string().min(2),
+    name: z.string().min(2),
+    email: z.string().email(),
+    password: z.string().min(6),
+  })
+  .strict();
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+const loginSchema = z
+  .object({
+    email: z.string().email(),
+    password: z.string().min(1),
+  })
+  .strict();
 
 async function register(req, res, next) {
   try {
+    if (req.timedout) return;
     const payload = registerSchema.parse(req.body);
     const data = await registerOwner({
       ...payload,
@@ -45,11 +50,13 @@ async function register(req, res, next) {
 
 async function loginHandler(req, res, next) {
   try {
+    if (req.timedout) return;
     const payload = loginSchema.parse(req.body);
     const data = await login({
       ...payload,
       userAgent: req.headers["user-agent"] || "",
       ipAddress: req.ip || "",
+      requestId: req.requestId,
     });
     if (data.refreshToken) {
       setRefreshTokenCookie(res, data.refreshToken);
@@ -71,6 +78,7 @@ async function loginHandler(req, res, next) {
 
 async function refreshHandler(req, res, next) {
   try {
+    if (req.timedout) return;
     const rawRefreshToken = req.cookies?.[refreshCookieName] || req.body?.refreshToken;
     if (!rawRefreshToken || typeof rawRefreshToken !== "string") {
       return sendError(res, {
@@ -107,12 +115,13 @@ async function refreshHandler(req, res, next) {
 
 async function logoutHandler(req, res, next) {
   try {
+    if (req.timedout) return;
     const raw = req.cookies?.[refreshCookieName];
     if (raw) {
       await revokeRefreshByRaw(raw);
     }
     clearRefreshTokenCookie(res);
-    return sendOk(res, { ok: true });
+    return sendOk(res, { sessionRevoked: true });
   } catch (error) {
     return next(error);
   }

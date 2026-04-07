@@ -17,7 +17,7 @@ import { useToastStore } from "../stores/toastStore";
 function getSyncRecovery(errorCode, errorMessage) {
   const code = errorCode || "";
   const message = String(errorMessage || "").toLowerCase();
-  if (code === "INVENTORY_CONFLICT" || message.includes("stock")) {
+  if (code === "INSUFFICIENT_STOCK" || code === "INVENTORY_CONFLICT" || message.includes("stock")) {
     return {
       title: "Inventory conflict",
       guidance: "Stock changed before sync completed. Review inventory, then retry sync.",

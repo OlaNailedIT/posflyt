@@ -10,3 +10,18 @@ export function isRecoverableNetworkError(error) {
   if (msg.includes("network error") || msg.includes("failed to fetch")) return true;
   return false;
 }
+
+/**
+ * Coarse error bucket for UI and analytics (uses API `code` when present).
+ */
+export function classifyError(error) {
+  if (!error?.response) return "NETWORK";
+
+  const code = error.response.data?.code;
+
+  if (code === "AUTH_REQUIRED") return "AUTH";
+  if (code === "CONFLICT") return "CONFLICT";
+  if (code === "INSUFFICIENT_STOCK") return "BUSINESS";
+
+  return "UNKNOWN";
+}

@@ -10,6 +10,15 @@ const { initSentry } = require("./utils/sentry");
 
 initSentry();
 
+process.on("unhandledRejection", (err) => {
+  logger.error({ err }, "UNHANDLED_REJECTION");
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "UNCAUGHT_EXCEPTION");
+  process.exit(1);
+});
+
 async function main() {
   logger.info({ service: "posflyt-backend" }, "Starting POSflyt backend");
 

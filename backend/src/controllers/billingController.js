@@ -9,15 +9,19 @@ const {
 const { ensureBusinessSubscription } = require("../services/subscriptionService");
 const { sendOk, sendError } = require("../utils/http");
 
-const checkoutSchema = z.object({
-  plan: z.enum(["FREE", "BASIC", "PREMIUM"]),
-  provider: z.enum(["STRIPE", "PAYSTACK"]),
-});
-const confirmSchema = z.object({
-  providerRef: z.string().min(5),
-  provider: z.enum(["STRIPE", "PAYSTACK"]),
-  plan: z.enum(["FREE", "BASIC", "PREMIUM"]),
-});
+const checkoutSchema = z
+  .object({
+    plan: z.enum(["FREE", "BASIC", "PREMIUM"]),
+    provider: z.enum(["STRIPE", "PAYSTACK"]),
+  })
+  .strict();
+const confirmSchema = z
+  .object({
+    providerRef: z.string().min(5),
+    provider: z.enum(["STRIPE", "PAYSTACK"]),
+    plan: z.enum(["FREE", "BASIC", "PREMIUM"]),
+  })
+  .strict();
 
 async function getCurrentSubscription(req, res, next) {
   try {

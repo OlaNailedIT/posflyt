@@ -1,33 +1,60 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCustomers } from "../hooks/useCustomers";
 import { useToastStore } from "../stores/toastStore";
+import { useConflictStore } from "../stores/conflictStore";
 
 export default function CustomersPage() {
+  const queryClient = useQueryClient();
   const { data: customers = [], addCustomer, editCustomer, isLoading } = useCustomers();
   const showToast = useToastStore((s) => s.showToast);
+  const pendingConflictIds = useConflictStore((s) => s.pendingConflictIds);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: "", phone: "", email: "" });
+  const [editBaselineUpdatedAt, setEditBaselineUpdatedAt] = useState(null);
 
   const onSubmit = async (e) => {
     e.preventDefault();
     try {
       if (editingId) {
-        await editCustomer.mutateAsync({ id: editingId, payload: form });
+        const baseline =
+          editBaselineUpdatedAt ||
+          customers.find((c) => c.id === editingId)?.updatedAt ||
+          customers.find((c) => c.id === editingId)?.createdAt;
+        await editCustomer.mutateAsync({
+          id: editingId,
+          payload: {
+            ...form,
+            lastKnownUpdatedAt: baseline ? String(baseline) : new Date().toISOString(),
+          },
+        });
         showToast("Customer updated.", "success");
       } else {
         await addCustomer.mutateAsync(form);
         showToast("Customer added.", "success");
       }
       setEditingId(null);
+      setEditBaselineUpdatedAt(null);
       setForm({ name: "", phone: "", email: "" });
     } catch (error) {
+      if (error.response?.data?.code === "CONFLICT") {
+        void queryClient.invalidateQueries({ queryKey: ["customers"] });
+        return;
+      }
       showToast(error.response?.data?.message || "Could not save customer.", "error");
     }
   };
 
   const startEdit = (customer) => {
     setEditingId(customer.id);
+    setEditBaselineUpdatedAt(
+      customer.updatedAt
+        ? String(customer.updatedAt)
+        : customer.createdAt
+          ? String(customer.createdAt)
+          : new Date().toISOString()
+    );
     setForm({
       name: customer.name || "",
       phone: customer.phone || "",
@@ -80,6 +107,7 @@ export default function CustomersPage() {
               type="button"
               onClick={() => {
                 setEditingId(null);
+                setEditBaselineUpdatedAt(null);
                 setForm({ name: "", phone: "", email: "" });
               }}
               className="rounded-lg border border-stone-300 px-4 py-2 dark:border-stone-600"
@@ -109,7 +137,16 @@ export default function CustomersPage() {
             className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900"
           >
             <p className="text-sm text-stone-500 dark:text-stone-400">{c.phone || "No phone"}</p>
-            <h2 className="mt-1 font-semibold text-stone-900 dark:text-stone-100">{c.name}</h2>
+            <h2 className="mt-1 font-semibold text-stone-900 dark:text-stone-100">
+              <span className="inline-flex flex-wrap items-center gap-2">
+                {c.name}
+                {pendingConflictIds[c.id] === "customer" && (
+                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                    Conflict
+                  </span>
+                )}
+              </span>
+            </h2>
             <p className="mt-1 text-teal-700 dark:text-teal-400">{c.email || "No email"}</p>
             <button
               type="button"

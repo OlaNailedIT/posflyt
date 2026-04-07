@@ -2,6 +2,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config/apiBaseUrl";
 import { clearSessionCookie, refreshAccessTokenSilently } from "./authRefresh";
 import { useAuthStore } from "../stores/authStore";
+import { useConflictStore } from "../stores/conflictStore";
 import { useToastStore } from "../stores/toastStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 
@@ -56,9 +57,56 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Stash last PUT JSON body so CONFLICT responses can retry with `force` (see ConflictResolutionHost). */
+api.interceptors.request.use((config) => {
+  const method = String(config.method || "").toLowerCase();
+  if (method === "put" && config.data != null) {
+    try {
+      const body = typeof config.data === "string" ? JSON.parse(config.data) : config.data;
+      config.__putBody = body && typeof body === "object" ? { ...body } : body;
+    } catch {
+      config.__putBody = null;
+    }
+  }
+  return config;
+});
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const rid = response.data?.requestId;
+    if (rid != null) {
+      response.requestId = rid;
+    }
+    return response;
+  },
   async (error) => {
+    const rid = error.response?.data?.requestId;
+    if (rid != null) {
+      error.requestId = rid;
+    }
+    if (!error.response) {
+      error.isNetworkError = true;
+      return Promise.reject(error);
+    }
+
+    const apiCode = error.response?.data?.code;
+    if (apiCode === "CONFLICT") {
+      const row = error.response.data?.data || {};
+      const url = String(error.config?.url || "");
+      const kind = url.includes("/customers/") ? "customer" : url.includes("/products/") ? "product" : null;
+      const originalPayload = error.config?.__putBody;
+      useConflictStore.getState().openConflict({
+        ...row,
+        originalPayload,
+        kind,
+      });
+      useToastStore.getState().showToast(
+        "This item was updated elsewhere. Please resolve the conflict.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+
     const status = error.response?.status;
     const config = error.config;
     if (status !== 401 || !config) {
@@ -118,7 +166,7 @@ export async function putProduct(id, body) {
 }
 
 export async function postTransaction(payload) {
-  const { data } = await api.post("/transactions", payload);
+  const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
   return unwrap(data);
 }
 

@@ -8,7 +8,7 @@ export const useOfflineStore = create((set) => ({
   failedTransactions: 0,
   queueLastAttemptAt: null,
   queueNextRetryAt: null,
-  queueReplayOrder: "Transactions sync in order of creation.",
+  queueReplayOrder: "Queued sales and other changes sync in creation order (FIFO).",
   syncing: false,
   syncProgress: { done: 0, total: 0, failed: 0 },
   lastSyncedAt: null,

@@ -4,6 +4,7 @@ const { signAuthToken } = require("../utils/jwt");
 const { ensureBusinessSubscription } = require("./subscriptionService");
 const { ensureOnboarding } = require("./onboardingService");
 const { createSession } = require("./sessionService");
+const { issueRefreshToken } = require("./refreshTokenService");
 const { logAudit } = require("./auditService");
 
 async function registerOwner({ businessName, name, email, password, userAgent, ipAddress }) {
@@ -41,6 +42,7 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
     role: user.role,
     jti,
   });
+  const refreshToken = await issueRefreshToken(user.id, jti);
   await logAudit({
     businessId: result.id,
     userId: user.id,
@@ -50,6 +52,7 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       name: user.name,
@@ -89,6 +92,7 @@ async function login({ email, password, userAgent, ipAddress }) {
     role: user.role,
     jti,
   });
+  const refreshToken = await issueRefreshToken(user.id, jti);
   await logAudit({
     businessId: user.businessId,
     userId: user.id,
@@ -98,6 +102,7 @@ async function login({ email, password, userAgent, ipAddress }) {
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       name: user.name,

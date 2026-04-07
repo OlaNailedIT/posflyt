@@ -25,10 +25,16 @@ async function validateSession(tokenJti) {
 }
 
 async function revokeAllUserSessions(userId) {
-  return prisma.activeSession.updateMany({
-    where: { userId, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
+  return prisma.$transaction([
+    prisma.activeSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
 }
 
 module.exports = { createSession, validateSession, revokeAllUserSessions };

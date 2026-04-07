@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { disableStaff, getStaff, postStaff, reactivateStaff } from "../services/api";
+import { useAuthStore } from "../stores/authStore";
 
 export function useStaff() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const query = useQuery({
     queryKey: ["staff"],
     queryFn: getStaff,
+    enabled: isAuthenticated,
     staleTime: 1000 * 60 * 2,
   });
 

@@ -10,7 +10,7 @@ async function requireAuth(req, res, next) {
       return sendError(res, {
         statusCode: 401,
         code: "AUTH_REQUIRED",
-        message: "Unauthorized",
+        message: "Unauthorized: authentication required",
         location: "middlewares/auth.requireAuth",
         details: { requestId: req.requestId },
       });
@@ -23,7 +23,7 @@ async function requireAuth(req, res, next) {
         return sendError(res, {
           statusCode: 401,
           code: "SESSION_EXPIRED",
-          message: "Session expired",
+          message: "Unauthorized: session expired or revoked",
           location: "middlewares/auth.requireAuth",
           details: { requestId: req.requestId },
         });
@@ -32,10 +32,16 @@ async function requireAuth(req, res, next) {
     req.auth = payload;
     return next();
   } catch (error) {
+    const code =
+      error.name === "TokenExpiredError"
+        ? "TOKEN_EXPIRED"
+        : error.name === "JsonWebTokenError"
+          ? "INVALID_TOKEN"
+          : "INVALID_TOKEN";
     return sendError(res, {
       statusCode: 401,
-      code: "INVALID_TOKEN",
-      message: "Invalid or expired token",
+      code,
+      message: "Unauthorized: Invalid or expired token",
       location: "middlewares/auth.requireAuth",
       details: { requestId: req.requestId },
     });

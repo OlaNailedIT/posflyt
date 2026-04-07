@@ -1,3 +1,6 @@
+// Schema changes: use `npm run prisma:migrate` (Prisma Migrate) locally, commit `migrations/`.
+// Do not use `db push` for production; `npm run prisma:db-push-dev` is for local prototyping only.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -27,18 +30,32 @@ model Business {
 }
 
 model User {
-  id           String          @id @default(uuid())
-  name         String
-  email        String          @unique
-  password     String
-  role         Role            @default(CASHIER)
-  createdAt    DateTime        @default(now())
-  businessId   String
-  sessions     ActiveSession[]
-  auditLogs    AuditLog[]
-  issues       IssueReport[]
-  transactions Transaction[]
-  business     Business        @relation(fields: [businessId], references: [id])
+  id             String          @id @default(uuid())
+  name           String
+  email          String          @unique
+  password       String
+  role           Role            @default(CASHIER)
+  createdAt      DateTime        @default(now())
+  businessId     String
+  sessions       ActiveSession[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  issues         IssueReport[]
+  transactions   Transaction[]
+  business       Business        @relation(fields: [businessId], references: [id])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  sessionJti String?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Store {

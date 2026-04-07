@@ -259,7 +259,7 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Offline Control Panel</h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            Use Sync Now to send queued offline sales when internet is available.
+            Use Sync Now to send queued offline sales and other pending changes when internet is available.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
             <span
@@ -267,7 +267,7 @@ export default function SettingsPage() {
             >
               {isOnline ? "Online" : "Offline"}
             </span>
-            <span>Pending transactions: {pendingTransactions}</span>
+            <span>Pending sync items: {pendingTransactions}</span>
             <span>Failed syncs: {failedTransactions}</span>
             <span>Duplicates prevented: {reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}</span>
             {syncing && syncProgress.total > 0 && (

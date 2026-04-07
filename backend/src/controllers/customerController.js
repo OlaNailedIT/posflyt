@@ -3,6 +3,7 @@ const { listCustomers, createCustomer, updateCustomer } = require("../services/c
 const { sendOk, sendError } = require("../utils/http");
 
 const customerCreateSchema = z.object({
+  id: z.string().uuid().optional(),
   name: z.string().trim().min(2).max(120),
   phone: z.string().trim().min(3).max(30),
   email: z.string().trim().email().max(160).optional().or(z.literal("")),

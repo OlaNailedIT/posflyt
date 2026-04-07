@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { postTransaction } from "../services/api";
-import { enqueueTransaction } from "../services/db";
+import { enqueueOutbox, enqueueTransaction, upsertCustomerInCache } from "../services/db";
 import { useCartStore } from "../stores/cartStore";
 import { useProducts } from "../hooks/useProducts";
 import { useOfflineStore } from "../stores/offlineStore";
@@ -13,6 +13,7 @@ import { formatMoney } from "../utils/currency";
 import { useCustomers } from "../hooks/useCustomers";
 import ReceiptModal from "../components/pos/ReceiptModal";
 import { calculateTaxTotal } from "../domain/tax";
+import { isRecoverableNetworkError } from "../utils/networkError";
 
 function buildCheckoutPayload({
   items,
@@ -87,29 +88,42 @@ export default function PosPage() {
     setLoading(true);
     try {
       if (isOnline) {
-        const response = await postTransaction(payload);
-        const first = response.results?.[0];
-        if (first?.status === "failed") {
-          const messageByCode = {
-            DUPLICATE_ID: "This sale was already recorded.",
-            INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
-            VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
-            TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
-          };
-          throw new Error(messageByCode[first.code] || first.message || "Checkout failed.");
+        try {
+          const response = await postTransaction(payload);
+          const first = response.results?.[0];
+          if (first?.status === "failed") {
+            const messageByCode = {
+              DUPLICATE_ID: "This sale was already recorded.",
+              INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
+              VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
+              TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
+            };
+            throw new Error(messageByCode[first.code] || first.message || "Checkout failed.");
+          }
+          const created = response.results?.find((r) => r.status === "created");
+          if (created?.receipt) setReceipt(created.receipt);
+          queryClient.invalidateQueries({ queryKey: ["products"] });
+          showToast("Sale completed.", "success");
+          clearCart();
+        } catch (error) {
+          if (isRecoverableNetworkError(error)) {
+            await enqueueTransaction(payload);
+            await refreshCount();
+            showToast(
+              "Connection unstable. Sale saved locally and will sync when the network is available.",
+              "success"
+            );
+            clearCart();
+          } else {
+            showToast(error.message || "Checkout failed. Try again.", "error");
+          }
         }
-        const created = response.results?.find((r) => r.status === "created");
-        if (created?.receipt) setReceipt(created.receipt);
-        queryClient.invalidateQueries({ queryKey: ["products"] });
-        showToast("Sale completed.", "success");
       } else {
         await enqueueTransaction(payload);
         await refreshCount();
         showToast("Saved offline. Will sync when you are back online.", "success");
+        clearCart();
       }
-      clearCart();
-    } catch (error) {
-      showToast(error.message || "Checkout failed. Try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -221,14 +235,38 @@ export default function PosPage() {
               className="rounded border border-stone-300 px-3 py-1.5 text-sm dark:border-stone-600"
               onClick={async () => {
                 if (!quickCustomer.name || !quickCustomer.phone) return;
-                try {
-                  const created = await addCustomer.mutateAsync(quickCustomer);
-                  setSelectedCustomerId(created.id);
-                  setQuickCustomer({ name: "", phone: "", email: "" });
-                  showToast("Customer added for checkout.", "success");
-                } catch {
-                  showToast("Could not add customer.", "error");
+                if (isOnline) {
+                  try {
+                    const created = await addCustomer.mutateAsync(quickCustomer);
+                    setSelectedCustomerId(created.id);
+                    setQuickCustomer({ name: "", phone: "", email: "" });
+                    showToast("Customer added for checkout.", "success");
+                  } catch {
+                    showToast("Could not add customer.", "error");
+                  }
+                  return;
                 }
+                const id = crypto.randomUUID();
+                const body = {
+                  id,
+                  name: quickCustomer.name.trim(),
+                  phone: quickCustomer.phone.trim(),
+                };
+                if (quickCustomer.email.trim()) {
+                  body.email = quickCustomer.email.trim();
+                }
+                await enqueueOutbox({ kind: "POST_CUSTOMER", body });
+                await upsertCustomerInCache({
+                  id,
+                  name: body.name,
+                  phone: body.phone,
+                  email: body.email || null,
+                });
+                await refreshCount();
+                await queryClient.invalidateQueries({ queryKey: ["customers"] });
+                setSelectedCustomerId(id);
+                setQuickCustomer({ name: "", phone: "", email: "" });
+                showToast("Customer saved offline. Will sync when you are back online.", "success");
               }}
             >
               Add Customer

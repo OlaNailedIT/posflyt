@@ -4,11 +4,12 @@ import { useAuthStore } from "../stores/authStore";
 
 export function useAdminMetrics() {
   const role = useAuthStore((s) => s.user?.role);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isAdmin = role === "ADMIN";
   return useQuery({
     queryKey: ["admin-metrics"],
     queryFn: getAdminMetrics,
-    enabled: isAdmin,
+    enabled: isAuthenticated && isAdmin,
     refetchInterval: 15000,
   });
 }

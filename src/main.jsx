@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import * as Sentry from "@sentry/react";
 import { BrowserRouter } from "react-router-dom";
@@ -8,8 +8,12 @@ import "./index.css";
 import { useOfflineSync } from "./hooks/useOfflineSync";
 import { useSettings } from "./hooks/useSettings";
 import ToastHost from "./components/ToastHost";
+import PwaUpdatePrompt from "./components/PwaUpdatePrompt";
 import ThemeSync from "./components/ThemeSync";
 import { RegionProvider } from "./context/RegionContext";
+import { bootstrapAuthSession } from "./auth/bootstrapAuthSession";
+import { useSessionRefreshTimer } from "./hooks/useSessionRefreshTimer";
+import { useAuthStore } from "./stores/authStore";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +35,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 }
 
 function AppBootstrap() {
+  useSessionRefreshTimer();
   useOfflineSync();
   useSettings();
   return (
@@ -38,8 +43,45 @@ function AppBootstrap() {
       <ThemeSync />
       <App />
       <ToastHost />
+      <PwaUpdatePrompt />
     </>
   );
+}
+
+/** Persist rehydrate + session bootstrap (memory token, optional silent refresh). */
+function AuthReadyRoot() {
+  const [persistReady, setPersistReady] = useState(
+    () => useAuthStore.persist?.hasHydrated?.() ?? false
+  );
+  const [sessionReady, setSessionReady] = useState(false);
+
+  useEffect(() => {
+    const unsub = useAuthStore.persist.onFinishHydration(() => setPersistReady(true));
+    if (useAuthStore.persist.hasHydrated()) setPersistReady(true);
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!persistReady) return undefined;
+    let cancelled = false;
+    (async () => {
+      await bootstrapAuthSession();
+      if (!cancelled) setSessionReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [persistReady]);
+
+  if (!persistReady || !sessionReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-stone-50 text-stone-600 dark:bg-stone-950 dark:text-stone-400">
+        Loading...
+      </div>
+    );
+  }
+
+  return <AppBootstrap />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -47,50 +89,14 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <RegionProvider>
-          <AppBootstrap />
+          <AuthReadyRoot />
         </RegionProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>
 );
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/sw.js")
-      .then((registration) => {
-        const SW_RELOAD_KEY = "posflyt-sw-activate-reload";
-
-        const promptReload = () => {
-          if (typeof window === "undefined") return;
-          if (window.confirm("A new version is available. Reload to update?")) {
-            sessionStorage.setItem(SW_RELOAD_KEY, "1");
-            if (registration.waiting) {
-              registration.waiting.postMessage({ type: "SKIP_WAITING" });
-            }
-          }
-        };
-
-        registration.addEventListener("updatefound", () => {
-          const newWorker = registration.installing;
-          if (!newWorker) return;
-          newWorker.addEventListener("statechange", () => {
-            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              promptReload();
-            }
-          });
-        });
-
-        if (registration.waiting && navigator.serviceWorker.controller) {
-          promptReload();
-        }
-
-        navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (sessionStorage.getItem(SW_RELOAD_KEY) !== "1") return;
-          sessionStorage.removeItem(SW_RELOAD_KEY);
-          window.location.reload();
-        });
-      })
-      .catch(() => {});
-  });
+/** Unregister any legacy SW during dev so stale caches do not break HMR. */
+if (import.meta.env.DEV && "serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
 }

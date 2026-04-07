@@ -1,20 +1,24 @@
 import { openDB } from "idb";
 
 const DB_NAME = "posflyt-offline-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   products: "products",
   dashboard: "dashboard",
   transactionsQueue: "transactions_queue",
+  customersCache: "customers_cache",
+  outbox: "outbox",
 };
+
+/** @typedef {'POST_PRODUCT'|'PUT_PRODUCT'|'POST_CUSTOMER'} OutboxKind */
 
 let dbPromise;
 
 function getDb() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains(STORES.products)) {
           db.createObjectStore(STORES.products, { keyPath: "id" });
         }
@@ -23,6 +27,14 @@ function getDb() {
         }
         if (!db.objectStoreNames.contains(STORES.transactionsQueue)) {
           db.createObjectStore(STORES.transactionsQueue, { keyPath: "id" });
+        }
+        if (oldVersion < 2) {
+          if (!db.objectStoreNames.contains(STORES.customersCache)) {
+            db.createObjectStore(STORES.customersCache, { keyPath: "id" });
+          }
+          if (!db.objectStoreNames.contains(STORES.outbox)) {
+            db.createObjectStore(STORES.outbox, { keyPath: "id" });
+          }
         }
       },
     });
@@ -43,6 +55,13 @@ export async function getProductsCache() {
   return db.getAll(STORES.products);
 }
 
+/** Merge one product into the local products cache (offline create/edit). */
+export async function upsertProductInCache(product) {
+  const all = await getProductsCache();
+  const next = all.filter((p) => p.id !== product.id).concat(product);
+  await saveProducts(next);
+}
+
 export async function saveDashboardCache(stats) {
   const db = await getDb();
   return db.put(STORES.dashboard, { id: "latest", ...stats, cachedAt: Date.now() });
@@ -51,6 +70,25 @@ export async function saveDashboardCache(stats) {
 export async function getDashboardCache() {
   const db = await getDb();
   return db.get(STORES.dashboard, "latest");
+}
+
+export async function saveCustomersCache(customers) {
+  const db = await getDb();
+  const tx = db.transaction(STORES.customersCache, "readwrite");
+  await tx.store.clear();
+  await Promise.all(customers.map((row) => tx.store.put(row)));
+  await tx.done;
+}
+
+export async function getCustomersCache() {
+  const db = await getDb();
+  return db.getAll(STORES.customersCache);
+}
+
+export async function upsertCustomerInCache(customer) {
+  const all = await getCustomersCache();
+  const next = all.filter((c) => c.id !== customer.id).concat(customer);
+  await saveCustomersCache(next);
 }
 
 export async function enqueueTransaction(transactionPayload) {
@@ -73,15 +111,54 @@ export async function enqueueTransaction(transactionPayload) {
   return entry;
 }
 
+/**
+ * Queue a non-transaction API mutation for replay when online (outbox).
+ * @param {object} opts
+ * @param {OutboxKind} opts.kind
+ * @param {object} opts.body
+ * @param {{ productId?: string }} [opts.meta]
+ * @param {string} [opts.id] — optional stable UUID for the queue row
+ */
+export async function enqueueOutbox(opts) {
+  const db = await getDb();
+  const id = opts.id || crypto.randomUUID();
+  const entry = {
+    id,
+    kind: opts.kind,
+    body: opts.body,
+    meta: opts.meta || {},
+    createdAt: Date.now(),
+    status: "pending",
+    retryCount: 0,
+    lastError: null,
+    lastErrorCode: null,
+    lastAttemptAt: null,
+    nextRetryAt: Date.now(),
+  };
+  await db.put(STORES.outbox, entry);
+  return entry;
+}
+
 export async function getQueuedTransactions() {
   const db = await getDb();
   const rows = await db.getAll(STORES.transactionsQueue);
   return rows.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 }
 
+export async function getQueuedOutbox() {
+  const db = await getDb();
+  const rows = await db.getAll(STORES.outbox);
+  return rows.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+}
+
 export async function removeQueuedTransaction(id) {
   const db = await getDb();
   return db.delete(STORES.transactionsQueue, id);
+}
+
+export async function removeOutbox(id) {
+  const db = await getDb();
+  return db.delete(STORES.outbox, id);
 }
 
 export async function updateQueuedTransactionPayload(id, patch) {
@@ -132,5 +209,41 @@ export async function markQueuedTransactionFailed(id, errorMessage, errorCode = 
     nextRetryAt: Date.now() + delayMs,
   };
   await db.put(STORES.transactionsQueue, next);
+  return next;
+}
+
+export async function markOutboxSyncing(id) {
+  const db = await getDb();
+  const row = await db.get(STORES.outbox, id);
+  if (!row) return null;
+  const next = {
+    ...row,
+    status: "syncing",
+    lastAttemptAt: Date.now(),
+    lastError: null,
+    lastErrorCode: null,
+    nextRetryAt: Date.now(),
+  };
+  await db.put(STORES.outbox, next);
+  return next;
+}
+
+export async function markOutboxFailed(id, errorMessage, errorCode = null) {
+  const db = await getDb();
+  const row = await db.get(STORES.outbox, id);
+  if (!row) return null;
+  const retryCount = Number(row.retryCount || 0) + 1;
+  const jitter = Math.floor(Math.random() * 1500);
+  const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(retryCount - 1, 5))) + jitter;
+  const next = {
+    ...row,
+    status: "failed",
+    retryCount,
+    lastAttemptAt: Date.now(),
+    lastError: errorMessage || "Sync failed",
+    lastErrorCode: errorCode,
+    nextRetryAt: Date.now() + delayMs,
+  };
+  await db.put(STORES.outbox, next);
   return next;
 }

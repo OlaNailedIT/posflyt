@@ -67,7 +67,8 @@ async function stripeWebhook(req, res, next) {
 
     const { providerRef, businessId, plan, status } = req.body || {};
     if (status === "PAID" && providerRef && businessId && plan) {
-      await markSubscriptionPaid({ providerRef, provider: "STRIPE", businessId, plan });
+      const result = await markSubscriptionPaid({ providerRef, provider: "STRIPE", businessId, plan });
+      return sendOk(res, { received: true, duplicate: Boolean(result?.skipped) });
     }
     return sendOk(res, { received: true });
   } catch (error) {
@@ -91,7 +92,8 @@ async function paystackWebhook(req, res, next) {
 
     const { providerRef, businessId, plan, status } = req.body || {};
     if (status === "PAID" && providerRef && businessId && plan) {
-      await markSubscriptionPaid({ providerRef, provider: "PAYSTACK", businessId, plan });
+      const result = await markSubscriptionPaid({ providerRef, provider: "PAYSTACK", businessId, plan });
+      return sendOk(res, { received: true, duplicate: Boolean(result?.skipped) });
     }
     return sendOk(res, { received: true });
   } catch (error) {

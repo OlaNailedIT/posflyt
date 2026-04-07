@@ -1,10 +1,13 @@
 import axios from "axios";
 import { API_BASE_URL } from "../config/apiBaseUrl";
+import { clearSessionCookie, refreshAccessTokenSilently } from "./authRefresh";
 import { useAuthStore } from "../stores/authStore";
+import { useToastStore } from "../stores/toastStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
 });
 
 function unwrap(data) {
@@ -13,21 +16,41 @@ function unwrap(data) {
     : data;
 }
 
+/** In-memory token first (fresh login), then `auth_token` / persisted Zustand. */
 function resolveAuthToken() {
   const fromStore = useAuthStore.getState().token;
   if (fromStore) return fromStore;
   return getStoredAuthTokenSync();
 }
 
+/** Login/register failures: do not logout or retry. */
 function isAuthRouteRequest(config) {
   const url = String(config?.url || "");
-  return url.includes("/auth/login") || url.includes("/auth/register");
+  return /\/auth\//.test(url);
+}
+
+function isRefreshRequest(config) {
+  const url = String(config?.url || "");
+  return url.includes("/auth/refresh");
+}
+
+function handleSessionExpired() {
+  void clearSessionCookie();
+  const { logout } = useAuthStore.getState();
+  logout();
+  if (typeof window !== "undefined") {
+    const path = window.location.pathname;
+    if (path !== "/login" && path !== "/register") {
+      useToastStore.getState().showToast("Your session has expired. Please sign in again.", "error");
+      window.setTimeout(() => window.location.assign("/login"), 50);
+    }
+  }
 }
 
 api.interceptors.request.use((config) => {
   const token = resolveAuthToken();
   if (token) {
-    config.headers = config.headers || {};
+    config.headers = config.headers ?? {};
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -35,15 +58,36 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = error.response?.status;
-    if (status === 401 && !isAuthRouteRequest(error.config || {})) {
-      const { logout } = useAuthStore.getState();
-      logout();
-      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-        window.location.assign("/login");
-      }
+    const config = error.config;
+    if (status !== 401 || !config) {
+      return Promise.reject(error);
     }
+
+    if (isRefreshRequest(config)) {
+      handleSessionExpired();
+      return Promise.reject(error);
+    }
+
+    if (isAuthRouteRequest(config)) {
+      return Promise.reject(error);
+    }
+
+    if (config._retryAfterRefresh) {
+      handleSessionExpired();
+      return Promise.reject(error);
+    }
+
+    const newToken = await refreshAccessTokenSilently();
+    if (newToken) {
+      config._retryAfterRefresh = true;
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${newToken}`;
+      return api.request(config);
+    }
+
+    handleSessionExpired();
     return Promise.reject(error);
   }
 );

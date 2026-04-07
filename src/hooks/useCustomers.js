@@ -1,11 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCustomers, postCustomer, putCustomer } from "../services/api";
+import { getCustomersCache, saveCustomersCache } from "../services/db";
+import { useAuthStore } from "../stores/authStore";
+import { useOfflineStore } from "../stores/offlineStore";
 
 export function useCustomers() {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isOnline = useOfflineStore((s) => s.isOnline);
+
   const query = useQuery({
     queryKey: ["customers"],
-    queryFn: getCustomers,
+    queryFn: async () => {
+      if (isOnline) {
+        try {
+          const data = await getCustomers();
+          await saveCustomersCache(data);
+          return data;
+        } catch {
+          return getCustomersCache();
+        }
+      }
+      return getCustomersCache();
+    },
+    enabled: isAuthenticated,
     staleTime: 1000 * 60 * 2,
   });
 

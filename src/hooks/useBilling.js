@@ -5,19 +5,24 @@ import {
   getPaymentHistory,
   getSubscription,
 } from "../services/api";
+import { useAuthStore } from "../stores/authStore";
 
 export function useSubscription() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: ["subscription"],
     queryFn: getSubscription,
+    enabled: isAuthenticated,
     staleTime: 1000 * 60,
   });
 }
 
 export function usePaymentHistory() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: ["payment-history"],
     queryFn: getPaymentHistory,
+    enabled: isAuthenticated,
     staleTime: 1000 * 60,
   });
 }

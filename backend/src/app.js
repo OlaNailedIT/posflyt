@@ -1,3 +1,4 @@
+const { corsOrigin } = require("./config/env");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -21,21 +22,68 @@ const sessionRoutes = require("./routes/sessionRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const systemRoutes = require("./routes/systemRoutes");
 const staffRoutes = require("./routes/staffRoutes");
+const cookieParser = require("cookie-parser");
 const { rateLimit } = require("./middlewares/rateLimit");
 const { requestContext } = require("./middlewares/requestContext");
 const { metricsTracker } = require("./middlewares/metricsTracker");
 const { errorHandler, notFound } = require("./middlewares/errorHandler");
+const prisma = require("./config/prisma");
 const { sendOk } = require("./utils/http");
 const { logger } = require("./utils/logger");
-const { corsOrigin } = require("./config/env");
+
+const PUBLIC_HEALTH_SERVICE_NAME = "posflyt-backend";
 
 const app = express();
 
-const allowedOrigins = corsOrigin === "*" ? true : corsOrigin.split(",").map((value) => value.trim());
+const allowedOriginsList =
+  corsOrigin === "*"
+    ? true
+    : corsOrigin
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-app.use(cors({ origin: allowedOrigins }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOriginsList === true) return callback(null, true);
+      if (Array.isArray(allowedOriginsList) && allowedOriginsList.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+app.use(cookieParser());
 app.use(helmet());
 app.use(requestContext);
+
+// Public liveness probe: no auth, no JSON/rate-limit/metrics middleware (single /health route in this app).
+app.get("/health", async (req, res) => {
+  logger.info(
+    { route: "/health", requestId: req.requestId },
+    "Health check requested"
+  );
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return sendOk(res, {
+      service: PUBLIC_HEALTH_SERVICE_NAME,
+      database: "connected",
+    });
+  } catch (err) {
+    logger.warn({ err }, "GET /health database check failed");
+    return res.status(503).json({
+      status: "error",
+      data: {
+        service: PUBLIC_HEALTH_SERVICE_NAME,
+        database: "disconnected",
+      },
+    });
+  }
+});
+
 app.use(
   pinoHttp({
     logger,
@@ -55,7 +103,6 @@ app.use(express.json());
 app.use(metricsTracker);
 app.use(rateLimit);
 
-app.get("/health", (_req, res) => sendOk(res, { service: "backend", status: "up" }));
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
 app.use("/transactions", transactionRoutes);

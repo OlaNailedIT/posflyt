@@ -6,12 +6,18 @@ import ThemeToggle from "../ThemeToggle";
 import SystemHealthBadge from "../SystemHealthBadge";
 import { can } from "../../utils/permissions";
 import { logoutAllDevices } from "../../services/api";
+import { clearSessionCookie } from "../../services/authRefresh";
 import { useToastStore } from "../../stores/toastStore";
 import { CORE_POSITIONING, VALIDATION_MODE } from "../../config/productMode";
 
 export default function AppShell() {
   const location = useLocation();
-  const logout = useAuthStore((s) => s.logout);
+  const clearAuth = useAuthStore((s) => s.logout);
+
+  const performLogout = async () => {
+    await clearSessionCookie();
+    clearAuth();
+  };
   const role = useAuthStore((s) => s.user?.role);
   const plan = useAuthStore((s) => s.user?.subscription_plan || "FREE");
   const isOnline = useOfflineStore((s) => s.isOnline);
@@ -191,7 +197,7 @@ export default function AppShell() {
             <ThemeToggle />
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void performLogout()}
               className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-800 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
             >
               Logout
@@ -201,7 +207,7 @@ export default function AppShell() {
               onClick={async () => {
                 try {
                   await logoutAllDevices();
-                  logout();
+                  clearAuth();
                   showToast("Logged out from all devices.", "success");
                 } catch {
                   showToast("Could not logout all devices.", "error");

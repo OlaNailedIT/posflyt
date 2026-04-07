@@ -121,3 +121,11 @@ test("core loop sanity with sync visibility", async ({ page, request }) => {
   await expect(page.getByText(/Plan: .* · Online/)).toBeVisible();
 });
 
+test("backend GET /health returns ok", async ({ request }) => {
+  const res = await request.get(`${backendBaseUrl}/health`);
+  expect(res.ok()).toBeTruthy();
+  const body = await res.json();
+  expect(body.status).toBe("ok");
+  expect(body.data?.service).toBe("backend");
+});
+

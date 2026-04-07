@@ -8,10 +8,12 @@ async function listCustomers(businessId) {
 }
 
 async function createCustomer(businessId, payload) {
+  const { id, ...rest } = payload;
   return prisma.customer.create({
     data: {
+      ...(id ? { id } : {}),
       businessId,
-      ...payload,
+      ...rest,
     },
   });
 }

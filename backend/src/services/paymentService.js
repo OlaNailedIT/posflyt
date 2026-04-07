@@ -43,6 +43,13 @@ async function createCheckoutSession({ businessId, plan, provider }) {
 }
 
 async function markSubscriptionPaid({ providerRef, provider, businessId, plan }) {
+  const existing = await prisma.paymentHistory.findFirst({
+    where: { providerRef, provider },
+  });
+  if (existing?.status === "PAID") {
+    return { skipped: true };
+  }
+
   const now = new Date();
   const expiresAt = new Date(now);
   expiresAt.setUTCMonth(expiresAt.getUTCMonth() + 1);
@@ -71,11 +78,13 @@ async function markSubscriptionPaid({ providerRef, provider, businessId, plan })
       },
     });
   });
+  return { skipped: false };
 }
 
 async function confirmPaymentForBusiness({ businessId, providerRef, provider, plan }) {
   await markSubscriptionPaid({ businessId, providerRef, provider, plan });
-  return prisma.subscription.findUnique({ where: { businessId } });
+  const subscription = await prisma.subscription.findUnique({ where: { businessId } });
+  return subscription;
 }
 
 function verifyWebhookSignature(provider, bodyString, signatureHeader) {

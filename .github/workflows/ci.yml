@@ -13,8 +13,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prisma-drift-check:
+    name: Prisma schema / migration drift check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shadow_posflyt?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install PostgreSQL client and create shadow database
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'shadow_posflyt'" | grep -q 1 \
+            || PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -c "CREATE DATABASE shadow_posflyt;"
+      - name: Verify migrations match schema.prisma (no drift)
+        run: bash scripts/prisma-drift-check.sh
+
   backend-unit:
     name: Backend Unit Tests
+    needs: prisma-drift-check
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,8 +87,13 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Prepare database schema
-        run: npx prisma db push --skip-generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      # Apply committed migrations to ephemeral Postgres (same files as production; no db push).
+      - name: Apply Prisma migrations (CI database only)
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
       - name: Run backend unit tests
         run: npm test
 
@@ -87,8 +132,12 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Prepare database schema
-        run: npx prisma db push --skip-generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Apply Prisma migrations (CI database only)
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
       - name: Run backend integration tests
         run: npm run test:integration
 
@@ -146,9 +195,14 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
         working-directory: backend
-      - name: Prepare database schema
-        run: npx prisma db push --skip-generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
         working-directory: backend
+      - name: Apply Prisma migrations (CI database only)
+        working-directory: backend
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
       - name: Run browser smoke tests

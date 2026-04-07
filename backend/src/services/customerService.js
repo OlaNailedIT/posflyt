@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { logger } = require("../utils/logger");
+const { sanitizeDisplayName, normalizeEmail, sanitizePlainText } = require("../utils/sanitize");
 
 async function listCustomers(businessId) {
   return prisma.customer.findMany({
@@ -10,11 +11,19 @@ async function listCustomers(businessId) {
 
 async function createCustomer(businessId, payload) {
   const { id, ...rest } = payload;
+  const name = sanitizeDisplayName(rest.name, 200);
+  const email =
+    rest.email == null || rest.email === "" ? rest.email : normalizeEmail(rest.email);
+  const phone =
+    rest.phone == null || rest.phone === "" ? rest.phone : sanitizePlainText(rest.phone, 40);
   return prisma.customer.create({
     data: {
       ...(id ? { id } : {}),
       businessId,
       ...rest,
+      name,
+      email,
+      phone,
     },
   });
 }
@@ -71,9 +80,20 @@ async function updateCustomer(businessId, customerId, payload) {
     throw error;
   }
 
+  const data = { ...raw };
+  if (data.name !== undefined) {
+    data.name = sanitizeDisplayName(data.name, 200);
+  }
+  if (data.email !== undefined && data.email !== null && data.email !== "") {
+    data.email = normalizeEmail(data.email);
+  }
+  if (data.phone !== undefined && data.phone !== null && data.phone !== "") {
+    data.phone = sanitizePlainText(data.phone, 40);
+  }
+
   return prisma.customer.update({
     where: { id: customerId },
-    data: raw,
+    data,
   });
 }
 

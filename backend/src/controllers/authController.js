@@ -56,6 +56,7 @@ async function loginHandler(req, res, next) {
       ...payload,
       userAgent: req.headers["user-agent"] || "",
       ipAddress: req.ip || "",
+      requestId: req.requestId,
     });
     if (data.refreshToken) {
       setRefreshTokenCookie(res, data.refreshToken);

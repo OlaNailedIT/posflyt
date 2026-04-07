@@ -4,6 +4,7 @@ const { PLAN_LIMITS, ensureBusinessSubscription } = require("./subscriptionServi
 const { markFirstProductDone } = require("./onboardingService");
 const { logAudit } = require("./auditService");
 const { logger } = require("../utils/logger");
+const { sanitizeDisplayName, sanitizeProductCode } = require("../utils/sanitize");
 
 async function listProducts(businessId) {
   return prisma.product.findMany({
@@ -26,10 +27,17 @@ async function createProduct(businessId, payload, userId) {
   const sellingPrice = rest.sellingPrice ?? rest.price ?? 0;
   const costPrice = rest.costPrice ?? 0;
   const price = rest.price ?? sellingPrice;
+  const name = sanitizeDisplayName(rest.name, 200);
+  const barcode =
+    rest.barcode == null || rest.barcode === ""
+      ? rest.barcode
+      : sanitizeProductCode(rest.barcode, 128);
   const created = await prisma.product.create({
     data: {
       id: id || randomUUID(),
       ...rest,
+      name,
+      barcode,
       price,
       sellingPrice,
       costPrice,
@@ -98,6 +106,12 @@ async function updateProduct(businessId, productId, payload, userId) {
   }
 
   const data = { ...raw };
+  if (data.name !== undefined) {
+    data.name = sanitizeDisplayName(data.name, 200);
+  }
+  if (data.barcode !== undefined && data.barcode !== null && data.barcode !== "") {
+    data.barcode = sanitizeProductCode(data.barcode, 128);
+  }
   if (data.sellingPrice !== undefined && data.price === undefined) {
     data.price = data.sellingPrice;
   }

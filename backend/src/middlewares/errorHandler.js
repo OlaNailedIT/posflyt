@@ -1,5 +1,4 @@
 const { sendError } = require("../utils/http");
-const { incrementApi5xx } = require("../services/runtimeMetricsService");
 const { logger } = require("../utils/logger");
 const { captureException } = require("../utils/sentry");
 
@@ -19,9 +18,9 @@ function errorHandler(err, req, res, _next) {
   const message = err.message || "Internal Server Error";
   const location = err.location || "middlewares/errorHandler.errorHandler";
 
+  const log = req.log || logger;
   const logBase = {
     event: "API_ERROR",
-    requestId: req.requestId,
     code,
     message,
     route: req.originalUrl,
@@ -30,7 +29,7 @@ function errorHandler(err, req, res, _next) {
   };
 
   if (code === "CONFLICT" && err.conflictData) {
-    logger.warn(logBase, "API error response");
+    log.warn(logBase, "API error response");
     return sendError(res, {
       statusCode: 409,
       code: "CONFLICT",
@@ -42,10 +41,9 @@ function errorHandler(err, req, res, _next) {
   }
 
   if (status < 500) {
-    logger.warn(logBase, "API error response");
+    log.warn(logBase, "API error response");
   } else {
-    incrementApi5xx();
-    logger.error({ ...logBase, status, location }, "Unhandled API error");
+    log.error({ ...logBase, status, location }, "Unhandled API error");
     captureException(err, {
       requestId: req.requestId,
       code,

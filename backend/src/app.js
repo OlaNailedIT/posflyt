@@ -1,5 +1,6 @@
-const { corsOrigin, nodeEnv } = require("./config/env");
+const { corsOrigin, nodeEnv, trustProxy } = require("./config/env");
 const express = require("express");
+const compression = require("compression");
 const cors = require("cors");
 const helmet = require("helmet");
 const pinoHttp = require("pino-http");
@@ -25,6 +26,7 @@ const staffRoutes = require("./routes/staffRoutes");
 const cookieParser = require("cookie-parser");
 const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
 const { attachRequestId } = require("./middlewares/requestId");
+const { attachRequestLogger } = require("./middlewares/requestLogger");
 const timeoutMiddleware = require("./middlewares/timeout");
 const { validateJsonContentType } = require("./middlewares/validateJsonContentType");
 const { metricsTracker } = require("./middlewares/metricsTracker");
@@ -32,12 +34,20 @@ const { errorHandler, notFound } = require("./middlewares/errorHandler");
 const prisma = require("./config/prisma");
 const { sendOk, sendError } = require("./utils/http");
 const { logger } = require("./utils/logger");
+const { getPrometheusMetrics } = require("./controllers/metricsController");
 
 const PUBLIC_HEALTH_SERVICE_NAME = "posflyt-backend";
 
 const app = express();
 
+if (trustProxy !== false) {
+  app.set("trust proxy", trustProxy);
+}
+
 app.use(attachRequestId);
+app.use(attachRequestLogger);
+// Phase 7.1: Prometheus scrape (optional); not subject to API rate limits.
+app.get("/metrics", getPrometheusMetrics);
 app.use(apiLimiter);
 
 const allowedOriginsList =
@@ -63,14 +73,23 @@ app.use(
   })
 );
 app.use(cookieParser());
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts:
+      nodeEnv === "production"
+        ? { maxAge: 15552000, includeSubDomains: true, preload: false }
+        : false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    permittedCrossDomainPolicies: { permittedPolicies: "none" },
+  })
+);
+app.use(compression({ threshold: 1024 }));
 
 // Public liveness probe: no auth, no JSON/rate-limit/metrics middleware (single /health route in this app).
 app.get("/health", async (req, res) => {
-  logger.info(
-    { route: "/health", requestId: req.requestId },
-    "Health check requested"
-  );
+  req.log.info({ route: "/health" }, "Health check requested");
   try {
     await prisma.$queryRaw`SELECT 1`;
     return sendOk(res, {
@@ -78,7 +97,7 @@ app.get("/health", async (req, res) => {
       database: "connected",
     });
   } catch (err) {
-    logger.warn({ err }, "GET /health database check failed");
+    req.log.warn({ err }, "GET /health database check failed");
     return sendError(res, {
       statusCode: 503,
       code: "SERVICE_UNAVAILABLE",
@@ -110,18 +129,16 @@ app.use(express.json({ limit: "1mb" }));
 app.use(timeoutMiddleware);
 app.use(validateJsonContentType);
 app.use((req, res, next) => {
-  logger.info(
+  req.log.info(
     {
-      requestId: req.requestId,
       route: req.originalUrl,
       method: req.method,
     },
     "REQUEST_START"
   );
   res.on("finish", () => {
-    logger.info(
+    req.log.info(
       {
-        requestId: req.requestId,
         route: req.originalUrl,
         method: req.method,
         statusCode: res.statusCode,

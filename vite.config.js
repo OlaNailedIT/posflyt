@@ -48,6 +48,23 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return undefined;
+            if (id.includes("@tanstack/react-query")) return "vendor-query";
+            if (id.includes("react-router")) return "vendor-router";
+            if (id.includes("react-dom") || id.includes("/react/")) return "vendor-react";
+            if (id.includes("zustand")) return "vendor-zustand";
+            if (id.includes("axios")) return "vendor-axios";
+            if (id.includes("@sentry")) return "vendor-sentry";
+            if (id.includes("idb")) return "vendor-idb";
+            return "vendor";
+          },
+        },
+      },
+    },
     plugins: [
       tailwindcss(),
       react(),

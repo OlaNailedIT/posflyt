@@ -84,6 +84,10 @@ Use **Done** / **Partial** / **Not started**. Evidence = link to PR, doc section
 3. **Prisma `P2021` (table missing):** Deploy backend with `npm run start:prod` (or `npx prisma migrate deploy` before start) so migrations apply; avoid manual SQL unless documented (see `docs/deployment-production.md`).  
 4. **Paystack webhook duplicates:** Same `providerRef` should be ignored after first success (see `markSubscriptionPaid` idempotency in `paymentService`).
 
+### Disaster recovery (Phase 7.6)
+
+For **RTO/RPO templates**, Neon restore expectations, multi-region notes, and **DR drill** cadence, see [`phase-7.6-disaster-recovery-bc.md`](./phase-7.6-disaster-recovery-bc.md).
+
 ---
 
 ## Phase 6.1 — Sync contract & API envelope (completion checklist)
@@ -148,3 +152,4 @@ Track these when closing Phase 6.1 (sync hardening).
 | 2026-04-07 | Phase 6.1: sync contract checklist + standardized API response helpers |
 | 2026-04-07 | Phase 6.2: client sync state machine checklist (IndexedDB + POS + header indicator) |
 | 2026-04-07 | Phase 6.3: batch sync + backoff + concurrency checklist |
+| 2026-04-07 | Phase 7.6: DR/BC doc link in runbook |

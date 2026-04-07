@@ -52,12 +52,15 @@ function errorHandler(err, req, res, _next) {
     });
   }
 
+  const extra =
+    err.details && typeof err.details === "object" && !Array.isArray(err.details) ? err.details : {};
+
   return sendError(res, {
     statusCode: status,
     code,
     message: status >= 500 ? "Internal Server Error" : message,
     location,
-    details: { requestId: req.requestId },
+    details: { requestId: req.requestId, ...extra },
   });
 }
 

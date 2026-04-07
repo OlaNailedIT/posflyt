@@ -6,6 +6,8 @@ import { useToastStore } from "../stores/toastStore";
 import ThemeToggle from "../components/ThemeToggle";
 import { CORE_POSITIONING } from "../config/productMode";
 import { registerErrorMessage } from "../utils/authErrors";
+import { trackEvent, trackMetaConversion } from "../utils/analytics";
+import { getStoredAttribution } from "../utils/utmCapture";
 
 export default function RegisterPage() {
   const login = useAuthStore((s) => s.login);
@@ -32,6 +34,8 @@ export default function RegisterPage() {
         token: data.token,
         user: data.user,
       });
+      trackEvent("sign_up", { method: "email", ...getStoredAttribution() });
+      trackMetaConversion("CompleteRegistration");
       showToast("Account created. Welcome to POSflyt.", "success");
       const next = searchParams.get("redirect");
       navigate(

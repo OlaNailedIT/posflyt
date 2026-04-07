@@ -10,7 +10,7 @@ function validateJsonContentType(req, res, next) {
   if (!["POST", "PUT", "PATCH"].includes(req.method)) return next();
 
   const path = req.originalUrl || req.url || "";
-  if (path.includes("/billing/webhooks")) return next();
+  if (path.includes("/billing/webhooks") || path.includes("/api/payments/webhook")) return next();
 
   const rawLen = req.headers["content-length"];
   if (rawLen === undefined) {

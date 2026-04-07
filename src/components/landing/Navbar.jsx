@@ -3,7 +3,9 @@ import ThemeToggle from "../ThemeToggle";
 
 export default function Navbar() {
   const { pathname } = useLocation();
-  const homePath = pathname === "/za" || pathname.startsWith("/za/") ? "/za" : pathname === "/ng" || pathname.startsWith("/ng/") ? "/ng" : "/";
+  const homePath =
+    pathname === "/za" || pathname.startsWith("/za/") ? "/za" : pathname === "/ng" || pathname.startsWith("/ng/") ? "/ng" : "/";
+  const howItWorksHref = `${homePath}#how-it-works`;
 
   return (
     <nav className="sticky top-0 z-50 border-b border-stone-200/80 bg-stone-100/90 backdrop-blur dark:border-stone-800 dark:bg-stone-950/90">
@@ -35,18 +37,27 @@ export default function Navbar() {
           </div>
         </div>
         <div className="hidden gap-6 text-sm text-stone-600 dark:text-stone-400 md:flex">
-          <a className="hover:text-stone-900 dark:hover:text-stone-200" href="#dashboard">
-            Value
-          </a>
-          <a className="hover:text-stone-900 dark:hover:text-stone-200" href="#dashboard">
-            Dashboard
-          </a>
-          <a className="hover:text-stone-900 dark:hover:text-stone-200" href="#how-it-works">
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/features">
+            Features
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/features/dashboard">
+            Dashboard demo
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to={howItWorksHref}>
             How it works
-          </a>
-          <a className="hover:text-stone-900 dark:hover:text-stone-200" href="#pricing">
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/pricing">
             Pricing
-          </a>
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/blog">
+            Blog
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/about">
+            About
+          </Link>
+          <Link className="hover:text-stone-900 dark:hover:text-stone-200" to="/contact">
+            Contact
+          </Link>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />

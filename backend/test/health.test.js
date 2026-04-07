@@ -9,5 +9,6 @@ test("GET /health returns ok", async () => {
   assert.equal(res.body.status, "ok");
   assert.ok(typeof res.body.requestId === "string" && res.body.requestId.length > 0);
   assert.equal(res.body.data.service, "posflyt-backend");
-  assert.equal(res.body.data.database, "connected");
+  assert.equal(res.body.data.status, "ok");
+  assert.ok(typeof res.body.data.uptimeSeconds === "number" && res.body.data.uptimeSeconds >= 0);
 });

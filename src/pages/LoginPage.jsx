@@ -6,6 +6,7 @@ import { useToastStore } from "../stores/toastStore";
 import ThemeToggle from "../components/ThemeToggle";
 import { CORE_POSITIONING } from "../config/productMode";
 import { loginErrorMessage } from "../utils/authErrors";
+import { trackEvent } from "../utils/analytics";
 
 export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
@@ -25,6 +26,7 @@ export default function LoginPage() {
         token: data.token,
         user: data.user,
       });
+      trackEvent("login", { method: "password" });
       showToast("Signed in successfully.", "success");
       const next = searchParams.get("redirect");
       navigate(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");

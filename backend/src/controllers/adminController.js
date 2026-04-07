@@ -3,7 +3,12 @@ const {
   getSalesFeed,
   getDailyCloseStatus,
   confirmDailyClose,
+  getBillingOverview,
+  listWebhookEventsForBusiness,
+  listPaymentsForAdmin,
 } = require("../services/adminService");
+const { processDuePaymentRetries } = require("../services/paymentRetryService");
+const { reconcilePaymentsForBusiness, applyReconciliationFixes } = require("../services/paymentReconciliationService");
 const { sendOk } = require("../utils/http");
 
 async function getAdminSalesFeed(req, res, next) {
@@ -42,4 +47,71 @@ async function postAdminDailyClose(req, res, next) {
   }
 }
 
-module.exports = { getAdminSalesFeed, getAdminMetrics, getAdminDailyCloseStatus, postAdminDailyClose };
+async function getAdminBillingOverview(req, res, next) {
+  try {
+    const data = await getBillingOverview(req.auth.businessId);
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getAdminWebhookEvents(req, res, next) {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const data = await listWebhookEventsForBusiness(req.auth.businessId, { limit });
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getAdminPaymentsQuery(req, res, next) {
+  try {
+    const { q, status, from, to } = req.query;
+    const data = await listPaymentsForAdmin(req.auth.businessId, { q, status, from, to });
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function postAdminPaymentRetriesRun(req, res, next) {
+  try {
+    const data = await processDuePaymentRetries();
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getPaymentsReconcile(req, res, next) {
+  try {
+    const data = await reconcilePaymentsForBusiness(req.auth.businessId);
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function postPaymentsReconcileApply(req, res, next) {
+  try {
+    const data = await applyReconciliationFixes(req.auth.businessId);
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = {
+  getAdminSalesFeed,
+  getAdminMetrics,
+  getAdminDailyCloseStatus,
+  postAdminDailyClose,
+  getAdminBillingOverview,
+  getAdminWebhookEvents,
+  getAdminPaymentsQuery,
+  postAdminPaymentRetriesRun,
+  getPaymentsReconcile,
+  postPaymentsReconcileApply,
+};

@@ -25,4 +25,7 @@ test("Prometheus text includes counters after recording HTTP", () => {
   assert.ok(text.includes("posflyt_process_uptime_seconds"));
   assert.ok(text.includes("posflyt_http_request_duration_seconds"));
   assert.ok(text.includes("posflyt_node_event_loop_delay_mean_seconds"));
+  assert.ok(text.includes("posflyt_billing_failed_payments_total"));
+  assert.ok(text.includes("posflyt_billing_retry_attempts_total"));
+  assert.ok(text.includes("posflyt_billing_webhook_failures_total"));
 });

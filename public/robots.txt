@@ -1,0 +1,17 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+
+# Marketing & app shell routes are crawlable; authenticated app areas are still protected by login.
+Disallow: /dashboard
+Disallow: /pos
+Disallow: /inventory
+Disallow: /customers
+Disallow: /settings
+Disallow: /staff
+Disallow: /billing
+Disallow: /audit-logs
+Disallow: /backups
+Disallow: /admin/
+
+Sitemap: https://posflyt.com/sitemap.xml

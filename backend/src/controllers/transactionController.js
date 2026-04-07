@@ -1,5 +1,6 @@
 const { z } = require("zod");
 const { createTransactionsBulk, listTransactions } = require("../services/transactionService");
+const { assertTransactionQuota } = require("../services/usageQuotaService");
 const { sendOk, sendError } = require("../utils/http");
 const { logger } = require("../utils/logger");
 
@@ -90,6 +91,10 @@ async function postTransaction(req, res, next) {
 
     const validated = bulkSchema.parse(payload);
     const businessId = req.auth.businessId;
+
+    await assertTransactionQuota(businessId, validated.transactions.length, {
+      userId: req.auth.userId,
+    });
 
     for (const tx of validated.transactions) {
       logger.info(

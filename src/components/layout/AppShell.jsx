@@ -12,6 +12,7 @@ import { useToastStore } from "../../stores/toastStore";
 import { CORE_POSITIONING, VALIDATION_MODE } from "../../config/productMode";
 import ConflictResolutionHost from "../ConflictResolutionHost";
 import SyncDebugPanel from "../SyncDebugPanel";
+import QuotaBanner from "../QuotaBanner";
 
 export default function AppShell() {
   const location = useLocation();
@@ -41,12 +42,16 @@ export default function AppShell() {
   ];
   const secondaryLinks = [
     { to: "/customers", label: "Customers" },
+    { to: "/usage", label: "Usage" },
     { to: "/onboarding", label: "Onboarding" },
     ...(can(role, "accessSettings") ? [{ to: "/settings", label: "Settings" }] : []),
     ...(role === "ADMIN" ? [{ to: "/staff", label: "Staff" }] : []),
     ...(!VALIDATION_MODE && can(role, "viewReports") && plan !== "FREE" ? [{ to: "/reports", label: "Reports" }] : []),
+    ...(!VALIDATION_MODE && can(role, "viewReports") && plan !== "FREE" ? [{ to: "/bi", label: "BI" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/billing", label: "Billing" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/audit-logs", label: "Audit Logs" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/monitoring", label: "Monitoring" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/growth", label: "Growth KPIs" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/backups", label: "Backups" }] : []),
     { to: "/help", label: "Help" },
   ];
@@ -60,7 +65,7 @@ export default function AppShell() {
   );
   const systemLinks = secondaryLinks.filter((l) => ["/help"].includes(l.to));
   const adminLinks = secondaryLinks.filter((l) =>
-    ["/reports", "/billing", "/audit-logs", "/backups"].includes(l.to)
+    ["/reports", "/bi", "/billing", "/audit-logs", "/backups", "/admin/monitoring", "/admin/growth"].includes(l.to)
   );
 
   useEffect(() => {
@@ -91,6 +96,7 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-stone-50 pb-20 text-stone-900 dark:bg-stone-950 dark:text-stone-100 md:pb-0">
+      <QuotaBanner />
       <header className="border-b border-stone-200 bg-white/90 backdrop-blur dark:border-stone-800 dark:bg-stone-900/90">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <Link to="/dashboard" className="text-lg font-bold text-teal-800 dark:text-teal-400">

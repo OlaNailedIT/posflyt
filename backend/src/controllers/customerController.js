@@ -31,7 +31,7 @@ async function getCustomers(req, res, next) {
 async function postCustomer(req, res, next) {
   try {
     const payload = customerCreateSchema.parse(req.body);
-    const data = await createCustomer(req.auth.businessId, payload);
+    const data = await createCustomer(req.auth.businessId, payload, req.auth.userId);
     return sendOk(res, data, 201);
   } catch (error) {
     if (error.name === "ZodError") {

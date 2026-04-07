@@ -4,6 +4,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useOfflineStore } from "../../stores/offlineStore";
 import ThemeToggle from "../ThemeToggle";
 import SystemHealthBadge from "../SystemHealthBadge";
+import SyncStatusIndicator from "../SyncStatusIndicator";
 import { can } from "../../utils/permissions";
 import { logoutAllDevices } from "../../services/api";
 import { clearSessionCookie } from "../../services/authRefresh";
@@ -181,8 +182,9 @@ export default function AppShell() {
               )}
             </div>
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <SystemHealthBadge />
+            <SyncStatusIndicator />
             <div className="rounded-lg border border-stone-300 bg-stone-100 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300">
               Plan: {plan} · {isOnline ? "Online" : "Offline"}
               {syncing ? " · Syncing" : ""}

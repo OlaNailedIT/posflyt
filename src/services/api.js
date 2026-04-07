@@ -59,6 +59,9 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    if (!error.response) {
+      error.isNetworkError = true;
+    }
     const status = error.response?.status;
     const config = error.config;
     if (status !== 401 || !config) {
@@ -118,7 +121,7 @@ export async function putProduct(id, body) {
 }
 
 export async function postTransaction(payload) {
-  const { data } = await api.post("/transactions", payload);
+  const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
   return unwrap(data);
 }
 

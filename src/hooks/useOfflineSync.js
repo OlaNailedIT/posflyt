@@ -4,17 +4,29 @@ import { postProduct, postTransaction, postCustomer, putProduct } from "../servi
 import {
   getQueuedOutbox,
   getQueuedTransactions,
+  getFailedQueuedTransactions,
   markOutboxFailed,
   markOutboxSyncing,
   markQueuedTransactionFailed,
+  markQueuedTransactionPending,
   markQueuedTransactionSyncing,
+  markQueuedTransactionSynced,
   removeOutbox,
-  removeQueuedTransaction,
+  resolveSyncStatus,
   updateQueuedTransactionPayload,
 } from "../services/db";
+import { SYNC_STATUS } from "../constants/syncStatus";
 import { useOfflineStore } from "../stores/offlineStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 import { useOnlineStatus } from "./useOnlineStatus";
+import { isRecoverableNetworkError } from "../utils/networkError";
+
+function isAppliedOrDuplicate(first) {
+  if (!first) return false;
+  if (first.syncStatus === "applied" || first.syncStatus === "duplicate") return true;
+  if (first.status === "created" || first.status === "duplicate") return true;
+  return false;
+}
 
 async function syncOneTransaction(item, onProgress) {
   const patch = {};
@@ -34,8 +46,8 @@ async function syncOneTransaction(item, onProgress) {
   try {
     const response = await postTransaction(payload);
     const first = Array.isArray(response?.results) ? response.results[0] : null;
-    if (first?.status === "duplicate") {
-      await removeQueuedTransaction(item.id);
+    if (isAppliedOrDuplicate(first)) {
+      await markQueuedTransactionSynced(item.id);
       onProgress?.({ doneIncrement: 1, failedIncrement: 0 });
       return;
     }
@@ -52,9 +64,20 @@ async function syncOneTransaction(item, onProgress) {
       throw syncError;
     }
 
-    await removeQueuedTransaction(item.id);
+    await markQueuedTransactionSynced(item.id);
     onProgress?.({ doneIncrement: 1, failedIncrement: 0 });
   } catch (error) {
+    const offline = typeof navigator !== "undefined" && !navigator.onLine;
+    const recoverable = isRecoverableNetworkError(error);
+    if (recoverable && offline) {
+      await markQueuedTransactionPending(item.id, error.message || null);
+      onProgress?.({
+        doneIncrement: 0,
+        failedIncrement: 0,
+        lastErrorCode: null,
+      });
+      return;
+    }
     onProgress?.({
       doneIncrement: 0,
       failedIncrement: 1,
@@ -63,7 +86,7 @@ async function syncOneTransaction(item, onProgress) {
     await markQueuedTransactionFailed(
       item.id,
       error.response?.data?.message || error.message,
-      error.syncCode || null
+      error.syncCode || error.response?.data?.code || null
     );
   }
 }
@@ -124,7 +147,7 @@ async function syncMergedQueue(merged, setSyncProgress) {
 export function useOfflineSync() {
   const queryClient = useQueryClient();
   const isOnline = useOnlineStatus();
-  const setQueueCount = useOfflineStore((s) => s.setQueueCount);
+  const setQueueBreakdown = useOfflineStore((s) => s.setQueueBreakdown);
   const setSyncing = useOfflineStore((s) => s.setSyncing);
   const setSyncProgress = useOfflineStore((s) => s.setSyncProgress);
   const setFailedCount = useOfflineStore((s) => s.setFailedCount);
@@ -137,13 +160,15 @@ export function useOfflineSync() {
   const refreshCount = useCallback(async () => {
     const queue = await getQueuedTransactions();
     const outbox = await getQueuedOutbox();
-    setQueueCount(queue.length + outbox.length);
+    const activeTx = queue.filter((item) => resolveSyncStatus(item) !== SYNC_STATUS.SYNCED);
+    const pendingOnly = activeTx.filter((item) => resolveSyncStatus(item) === SYNC_STATUS.PENDING).length;
+    const syncingOnly = activeTx.filter((item) => resolveSyncStatus(item) === SYNC_STATUS.SYNCING).length;
     const failedItems = [
-      ...queue.filter((item) => item.status === "failed"),
+      ...queue.filter((item) => resolveSyncStatus(item) === SYNC_STATUS.FAILED),
       ...outbox.filter((item) => item.status === "failed"),
     ].sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
-    setFailedCount(failedItems.length);
-    const combined = [...queue, ...outbox];
+    const failedCount = failedItems.length;
+    const combined = [...activeTx, ...outbox];
     const queueLastAttemptAt = combined
       .map((item) => Number(item.lastAttemptAt || 0))
       .filter((value) => value > 0)
@@ -152,18 +177,42 @@ export function useOfflineSync() {
       .map((item) => Number(item.nextRetryAt || 0))
       .filter((value) => value > 0)
       .sort((a, b) => a - b)[0];
+    setQueueBreakdown({
+      pendingTransactions: activeTx.length + outbox.length,
+      queuePendingCount: pendingOnly,
+      queueSyncingCount: syncingOnly,
+      failedTransactions: failedCount,
+    });
     setQueueMeta({
       queueLastAttemptAt: queueLastAttemptAt ? new Date(queueLastAttemptAt).toISOString() : null,
       queueNextRetryAt: queueNextRetryAt ? new Date(queueNextRetryAt).toISOString() : null,
     });
-    setLastSyncError(failedItems[0]?.lastError || null, failedItems[0]?.lastErrorCode || null);
-  }, [setFailedCount, setLastSyncError, setQueueCount, setQueueMeta]);
+    setLastSyncError(failedItems[0]?.lastError || failedItems[0]?.syncError || null, failedItems[0]?.lastErrorCode || null);
+  }, [setLastSyncError, setQueueBreakdown, setQueueMeta]);
+
+  const retryFailedTransactions = useCallback(async () => {
+    if (!getStoredAuthTokenSync()) return;
+    const failed = await getFailedQueuedTransactions();
+    for (const tx of failed) {
+      await syncOneTransaction(tx, () => {});
+    }
+    await refreshCount();
+  }, [refreshCount]);
+
+  const syncSingleTransaction = useCallback(
+    async (item) => {
+      await syncOneTransaction(item, () => {});
+      await refreshCount();
+    },
+    [refreshCount]
+  );
 
   const syncQueue = useCallback(
     async (force = false) => {
       if (!isOnline) return;
       if (!getStoredAuthTokenSync()) return;
-      const txQueue = await getQueuedTransactions();
+      const allTx = await getQueuedTransactions();
+      const txQueue = allTx.filter((row) => resolveSyncStatus(row) !== SYNC_STATUS.SYNCED);
       const outbox = await getQueuedOutbox();
       const now = Date.now();
       const merged = [
@@ -176,8 +225,12 @@ export function useOfflineSync() {
         : merged.filter((e) => Number(e.row.nextRetryAt || 0) <= now);
 
       if (!merged.length) {
-        setQueueCount(0);
-        setFailedCount(0);
+        setQueueBreakdown({
+          pendingTransactions: 0,
+          queuePendingCount: 0,
+          queueSyncingCount: 0,
+          failedTransactions: 0,
+        });
         setLastSyncError(null, null);
         setQueueMeta({ queueLastAttemptAt: null, queueNextRetryAt: null });
         setSyncProgress({ done: 0, total: 0, failed: 0 });
@@ -195,42 +248,11 @@ export function useOfflineSync() {
         await queryClient.invalidateQueries({ queryKey: ["customers"] });
         setLastSyncedAt(new Date().toISOString());
       } finally {
-        const remainingTx = await getQueuedTransactions();
-        const remainingOb = await getQueuedOutbox();
-        setQueueCount(remainingTx.length + remainingOb.length);
-        const failedItems = [
-          ...remainingTx.filter((item) => item.status === "failed"),
-          ...remainingOb.filter((item) => item.status === "failed"),
-        ].sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
-        setFailedCount(failedItems.length);
-        const combined = [...remainingTx, ...remainingOb];
-        const queueLastAttemptAt = combined
-          .map((item) => Number(item.lastAttemptAt || 0))
-          .filter((value) => value > 0)
-          .sort((a, b) => b - a)[0];
-        const queueNextRetryAt = failedItems
-          .map((item) => Number(item.nextRetryAt || 0))
-          .filter((value) => value > 0)
-          .sort((a, b) => a - b)[0];
-        setQueueMeta({
-          queueLastAttemptAt: queueLastAttemptAt ? new Date(queueLastAttemptAt).toISOString() : null,
-          queueNextRetryAt: queueNextRetryAt ? new Date(queueNextRetryAt).toISOString() : null,
-        });
-        setLastSyncError(failedItems[0]?.lastError || null, failedItems[0]?.lastErrorCode || null);
+        await refreshCount();
         setSyncing(false);
       }
     },
-    [
-      isOnline,
-      setFailedCount,
-      setLastSyncError,
-      setLastSyncedAt,
-      setQueueCount,
-      setQueueMeta,
-      setSyncing,
-      setSyncProgress,
-      queryClient,
-    ]
+    [isOnline, queryClient, refreshCount, setLastSyncedAt, setQueueBreakdown, setQueueMeta, setSyncing, setSyncProgress]
   );
 
   useEffect(() => {
@@ -238,8 +260,24 @@ export function useOfflineSync() {
   }, [refreshCount]);
 
   useEffect(() => {
-    if (isOnline && getStoredAuthTokenSync()) syncQueue();
+    if (isOnline && getStoredAuthTokenSync()) {
+      void syncQueue();
+    }
   }, [isOnline, syncQueue]);
+
+  useEffect(() => {
+    if (!getStoredAuthTokenSync()) return undefined;
+    const onOnline = () => {
+      void retryFailedTransactions();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [retryFailedTransactions]);
+
+  useEffect(() => {
+    if (!isOnline || !getStoredAuthTokenSync()) return undefined;
+    void retryFailedTransactions();
+  }, [isOnline, retryFailedTransactions]);
 
   useEffect(() => {
     if (!getStoredAuthTokenSync()) return undefined;
@@ -250,5 +288,5 @@ export function useOfflineSync() {
     return () => clearInterval(timer);
   }, [isOnline, pendingTransactions, syncing, syncQueue]);
 
-  return { syncQueue, refreshCount, isOnline };
+  return { syncQueue, refreshCount, isOnline, retryFailedTransactions, syncSingleTransaction };
 }

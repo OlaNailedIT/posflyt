@@ -100,6 +100,18 @@ Track these when closing Phase 6.1 (sync hardening).
 
 **Evidence:** `docs/adr/003-sync-contract.md`, `backend/src/utils/sendOk.js`, `backend/src/utils/sendError.js`, `backend/src/controllers/transactionController.js`, integration tests under `backend/test/`.
 
+### Phase 6.2 — Client sync state machine (checklist)
+
+| Done | Item |
+|------|------|
+| [ ] | Client sync state machine implemented |
+| [ ] | Failed transactions retryable |
+| [ ] | Sync UI indicators visible |
+| [ ] | Global sync indicator added |
+| [ ] | Offline → online sync tested |
+
+**Evidence:** `src/constants/syncStatus.js`, `src/services/db.js` (queue fields), `src/hooks/useOfflineSync.js`, `src/pages/PosPage.jsx`, `src/components/SyncStatusIndicator.jsx`.
+
 ---
 
 ## Revision
@@ -110,3 +122,4 @@ Track these when closing Phase 6.1 (sync hardening).
 | 2026-04-05 | Phase 2: CI uses `migrate deploy`; runbook + deploy doc aligned with `VITE_API_URL` / `start:prod` |
 | 2026-04-05 | Phase 3.1: `prisma validate` in CI, Node engines + `.nvmrc`, `deployment-phase-3.1.md` |
 | 2026-04-07 | Phase 6.1: sync contract checklist + standardized API response helpers |
+| 2026-04-07 | Phase 6.2: client sync state machine checklist (IndexedDB + POS + header indicator) |

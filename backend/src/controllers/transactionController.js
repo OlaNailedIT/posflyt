@@ -1,6 +1,7 @@
 const { z } = require("zod");
 const { createTransactionsBulk, listTransactions } = require("../services/transactionService");
 const { sendOk, sendError } = require("../utils/http");
+const { logger } = require("../utils/logger");
 
 const transactionSchema = z.object({
   client_transaction_id: z.string().uuid(),
@@ -63,8 +64,21 @@ async function postTransaction(req, res, next) {
         : { transactions: [req.body] };
 
     const validated = bulkSchema.parse(payload);
+    const businessId = req.auth.businessId;
+
+    for (const tx of validated.transactions) {
+      logger.info(
+        {
+          event: "SYNC_ATTEMPT",
+          clientTransactionId: tx.client_transaction_id,
+          businessId,
+        },
+        "sync attempt"
+      );
+    }
+
     const results = await createTransactionsBulk(
-      req.auth.businessId,
+      businessId,
       req.auth.userId,
       validated.transactions
     );
@@ -72,6 +86,36 @@ async function postTransaction(req, res, next) {
     const augmented = validated.transactions.map((tx, i) =>
       augmentSyncResult(results[i], tx.client_transaction_id)
     );
+
+    for (const r of augmented) {
+      if (r.status === "duplicate") {
+        logger.info(
+          {
+            event: "SYNC_DUPLICATE",
+            clientTransactionId: r.clientTransactionId,
+          },
+          "sync duplicate"
+        );
+      } else if (r.status === "created") {
+        const tid = r.transaction?.id ?? r.transactionId;
+        logger.info(
+          {
+            event: "SYNC_SUCCESS",
+            transactionId: tid,
+          },
+          "sync success"
+        );
+      } else if (r.status === "failed") {
+        logger.error(
+          {
+            event: "SYNC_ERROR",
+            error: r.message || "Unknown",
+            clientTransactionId: r.clientTransactionId,
+          },
+          "sync error"
+        );
+      }
+    }
 
     const failed = augmented.filter((r) => r.status === "failed").length;
     const statusCode = failed ? 207 : 201;
@@ -103,9 +147,7 @@ async function postTransaction(req, res, next) {
         message: "Validation failed",
         location: "controllers/transactionController.postTransaction",
         details: { requestId: req.requestId, errors: error.issues },
-        ...(clientTransactionId
-          ? { data: { clientTransactionId } }
-          : {}),
+        data: clientTransactionId ? { clientTransactionId } : undefined,
       });
     }
     return next(error);

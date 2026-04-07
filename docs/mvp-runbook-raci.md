@@ -86,6 +86,22 @@ Use **Done** / **Partial** / **Not started**. Evidence = link to PR, doc section
 
 ---
 
+## Phase 6.1 — Sync contract & API envelope (completion checklist)
+
+Track these when closing Phase 6.1 (sync hardening).
+
+| Done | Item |
+|------|------|
+| [x] | Sync contract defined (ADR 003) |
+| [x] | Idempotency enforced at DB + API |
+| [x] | Response format standardized (`sendOk` / `sendError` envelopes) |
+| [x] | Sync logs added (`SYNC_*` events on transactions) |
+| [x] | Duplicate request tested (manual or integration) |
+
+**Evidence:** `docs/adr/003-sync-contract.md`, `backend/src/utils/sendOk.js`, `backend/src/utils/sendError.js`, `backend/src/controllers/transactionController.js`, integration tests under `backend/test/`.
+
+---
+
 ## Revision
 
 | Date | Change |
@@ -93,3 +109,4 @@ Use **Done** / **Partial** / **Not started**. Evidence = link to PR, doc section
 | 2026-04-05 | Initial MVP RACI + checklist |
 | 2026-04-05 | Phase 2: CI uses `migrate deploy`; runbook + deploy doc aligned with `VITE_API_URL` / `start:prod` |
 | 2026-04-05 | Phase 3.1: `prisma validate` in CI, Node engines + `.nvmrc`, `deployment-phase-3.1.md` |
+| 2026-04-07 | Phase 6.1: sync contract checklist + standardized API response helpers |

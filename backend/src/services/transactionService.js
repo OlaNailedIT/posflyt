@@ -235,8 +235,9 @@ async function createTransactionsBulk(businessId, userId, transactions) {
   const results = [];
   for (const payload of ordered) {
     try {
-      const result = await prisma.$transaction(async (tx) =>
-        processSingleTransaction(tx, businessId, userId, payload)
+      const result = await prisma.$transaction(
+        async (tx) => processSingleTransaction(tx, businessId, userId, payload),
+        { timeout: 15_000, maxWait: 10_000 }
       );
       results.push(result);
       if (result.status === "duplicate") {

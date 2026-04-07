@@ -28,7 +28,7 @@ const { requestContext } = require("./middlewares/requestContext");
 const { metricsTracker } = require("./middlewares/metricsTracker");
 const { errorHandler, notFound } = require("./middlewares/errorHandler");
 const prisma = require("./config/prisma");
-const { sendOk } = require("./utils/http");
+const { sendOk, sendError } = require("./utils/http");
 const { logger } = require("./utils/logger");
 
 const PUBLIC_HEALTH_SERVICE_NAME = "posflyt-backend";
@@ -74,8 +74,10 @@ app.get("/health", async (req, res) => {
     });
   } catch (err) {
     logger.warn({ err }, "GET /health database check failed");
-    return res.status(503).json({
-      status: "error",
+    return sendError(res, {
+      statusCode: 503,
+      code: "SERVICE_UNAVAILABLE",
+      message: "Database unavailable",
       data: {
         service: PUBLIC_HEALTH_SERVICE_NAME,
         database: "disconnected",

@@ -112,7 +112,7 @@ async function logoutHandler(req, res, next) {
       await revokeRefreshByRaw(raw);
     }
     clearRefreshTokenCookie(res);
-    return sendOk(res, { ok: true });
+    return sendOk(res, { sessionRevoked: true });
   } catch (error) {
     return next(error);
   }

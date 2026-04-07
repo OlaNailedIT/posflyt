@@ -4,9 +4,8 @@ const { getCustomers, postCustomer, putCustomer } = require("../controllers/cust
 
 const router = express.Router();
 
-router.use(requireAuth);
-router.get("/customers", getCustomers);
-router.post("/customers", postCustomer);
-router.put("/customers/:id", putCustomer);
+router.get("/customers", requireAuth, getCustomers);
+router.post("/customers", requireAuth, postCustomer);
+router.put("/customers/:id", requireAuth, putCustomer);
 
 module.exports = router;

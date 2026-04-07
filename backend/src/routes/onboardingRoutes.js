@@ -4,8 +4,7 @@ const { getStatus, markActive } = require("../controllers/onboardingController")
 
 const router = express.Router();
 
-router.use(requireAuth);
-router.get("/onboarding/status", getStatus);
-router.post("/onboarding/active", markActive);
+router.get("/onboarding/status", requireAuth, getStatus);
+router.post("/onboarding/active", requireAuth, markActive);
 
 module.exports = router;

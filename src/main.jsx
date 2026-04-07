@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import * as Sentry from "@sentry/react";
 import { BrowserRouter } from "react-router-dom";
+import { HelmetProvider } from "react-helmet-async";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import "./index.css";
@@ -11,6 +12,7 @@ import ToastHost from "./components/ToastHost";
 import PwaUpdatePrompt from "./components/PwaUpdatePrompt";
 import ThemeSync from "./components/ThemeSync";
 import { RegionProvider } from "./context/RegionContext";
+import { AnalyticsProvider } from "./context/AnalyticsContext";
 import { bootstrapAuthSession } from "./auth/bootstrapAuthSession";
 import { useSessionRefreshTimer } from "./hooks/useSessionRefreshTimer";
 import { useAuthStore } from "./stores/authStore";
@@ -88,9 +90,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <RegionProvider>
-          <AuthReadyRoot />
-        </RegionProvider>
+        <HelmetProvider>
+          <AnalyticsProvider>
+            <RegionProvider>
+              <AuthReadyRoot />
+            </RegionProvider>
+          </AnalyticsProvider>
+        </HelmetProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>

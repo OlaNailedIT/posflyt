@@ -27,6 +27,8 @@ model Business {
   subscription   Subscription?
   transactions   Transaction[]
   users          User[]
+  subscriptionLifecycleEvents SubscriptionLifecycleEvent[]
+  usageMonthly                UsageMonthly[]
 }
 
 model User {
@@ -105,6 +107,7 @@ model Customer {
   transactions Transaction[]
 
   @@index([businessId])
+  @@index([businessId, createdAt(sort: Desc)])
 }
 
 model Transaction {
@@ -168,12 +171,31 @@ model Subscription {
   provider     String?
   externalRef  String?
   expiresAt    DateTime?
+  /// Optional FREE trial end for new signups when BILLING_TRIAL_DAYS is set; null = legacy unlimited FREE.
+  trialEndsAt  DateTime?
+  /// After paid `expiresAt`, access may continue until this instant (Phase 7.4 grace).
+  graceEndsAt  DateTime?
+  /// User requested cancel at end of current period (MVP flag; renewal still applies via webhook).
+  cancelAtPeriodEnd Boolean       @default(false)
   featureFlags Json?
   usageLimits  Json?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   businessId   String             @unique
   business     Business           @relation(fields: [businessId], references: [id])
+}
+
+/// Timestamped subscription / trial events for analytics and retention (Phase 7.4).
+model SubscriptionLifecycleEvent {
+  id         String   @id @default(uuid())
+  businessId String
+  eventType  String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt(sort: Desc)])
 }
 
 model OnboardingProgress {
@@ -206,14 +228,48 @@ model PaymentHistory {
   providerRef String
   plan        SubscriptionPlan
   amount      Float
+  /// Optional breakdown (e.g. pro-rata upgrade credit) for support and idempotent reconciliation.
+  metadata    Json?
   currency    String           @default("USD")
-  status      String
+  status      PaymentStatus    @default(pending)
   paidAt      DateTime?
-  createdAt   DateTime         @default(now())
-  businessId  String
-  business    Business         @relation(fields: [businessId], references: [id])
+  /// API request id when checkout was created (correlation / support).
+  clientRequestId String?
+  /// Last gateway webhook event id applied to this row (if any).
+  gatewayEventId  String?
+  /// Unique idempotency key per intent (Stripe/Paystack idempotency + local dedupe).
+  idempotencyKey  String?        @unique
+  retryCount      Int            @default(0)
+  lastRetryAt     DateTime?
+  /// When set, automated retry may run (exponential backoff from lastRetryAt).
+  nextRetryAt     DateTime?
+  failureReason   String?
+  /// Stripe session / Paystack access_code / PI ids for reconciliation and retries.
+  providerMetadata Json?
+  createdAt       DateTime       @default(now())
+  businessId      String
+  business        Business       @relation(fields: [businessId], references: [id])
 
+  @@unique([provider, providerRef])
   @@index([businessId])
+  @@index([status, nextRetryAt])
+  @@index([clientRequestId])
+}
+
+/// Idempotent gateway event ledger (unique provider + dedupeKey = one processed delivery).
+model BillingWebhookEvent {
+  id         String   @id @default(uuid())
+  provider   String
+  dedupeKey  String
+  businessId String?
+  metadata   Json?
+  /// SUCCESS | DUPLICATE | IGNORED | ERROR (best-effort for observability)
+  outcome    String?  @default("SUCCESS")
+  createdAt  DateTime @default(now())
+
+  @@unique([provider, dedupeKey])
+  @@index([businessId])
+  @@index([createdAt])
 }
 
 model ActiveSession {
@@ -241,6 +297,7 @@ model AuditLog {
   user       User?    @relation(fields: [userId], references: [id])
 
   @@index([businessId, createdAt(sort: Desc)])
+  @@index([userId])
 }
 
 model BackupRecord {
@@ -303,4 +360,39 @@ enum SubscriptionStatus {
 enum AlertType {
   SALES_SPIKE
   SALES_DROP
+}
+
+/// Gateway payment lifecycle (lowercase values for API consistency).
+enum PaymentStatus {
+  pending
+  paid
+  failed
+  retrying
+  canceled
+}
+
+/// Tier-based feature toggles (Phase 7.5). Editable without redeploy; optional A/B via `abRolloutPercent`.
+model FeatureFlag {
+  id                 String   @id @default(uuid())
+  key                String   @unique
+  label              String?
+  freeEnabled        Boolean  @default(false)
+  basicEnabled       Boolean  @default(false)
+  premiumEnabled     Boolean  @default(false)
+  /// When set (0–100), only that bucket of businesses per key sees the flag in addition to tier rules.
+  abRolloutPercent   Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Monthly API usage meter per business (Phase 7.5). Transaction/customer counts use live aggregates.
+model UsageMonthly {
+  id              String   @id @default(uuid())
+  businessId      String
+  yearMonth       String
+  apiRequestCount Int      @default(0)
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, yearMonth])
+  @@index([businessId])
 }

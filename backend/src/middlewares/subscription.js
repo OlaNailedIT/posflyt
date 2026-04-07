@@ -2,6 +2,7 @@ const {
   ensureBusinessSubscription,
   hasPlanAccess,
   isSubscriptionActive,
+  isTrialExpired,
 } = require("../services/subscriptionService");
 const { sendError } = require("../utils/http");
 
@@ -11,10 +12,14 @@ function requirePlan(minimumPlan) {
       const subscription = await ensureBusinessSubscription(req.auth.businessId);
       req.subscription = subscription;
       if (!isSubscriptionActive(subscription)) {
+        const trialExpired =
+          subscription.plan === "FREE" && isTrialExpired(subscription);
         return sendError(res, {
-          statusCode: 403,
-          code: "SUBSCRIPTION_EXPIRED",
-          message: "Subscription expired. Please renew your plan.",
+          statusCode: trialExpired ? 402 : 403,
+          code: trialExpired ? "PAYMENT_REQUIRED" : "SUBSCRIPTION_EXPIRED",
+          message: trialExpired
+            ? "Trial ended or subscription inactive. Choose a plan to continue."
+            : "Subscription expired. Please renew your plan.",
           location: "middlewares/subscription.requirePlan",
           details: { requestId: req.requestId },
         });

@@ -2,6 +2,11 @@
 
 | Document | Purpose |
 |----------|---------|
+| [phase-7.1-payment-gateway.md](./phase-7.1-payment-gateway.md) | Phase 7.1: env, `/api/payments/webhook`, Stripe verify, admin search, PCI notes |
+| [phase-7-billing-revenue.md](./phase-7-billing-revenue.md) | Phase 7: billing idempotency, webhooks, trial flags, admin revenue panel |
+| [phase-6-seo.md](./phase-6-seo.md) | Phase 6: meta tags, OG/Twitter, JSON-LD, URLs, caching notes |
+| [phase-5-marketing-ux.md](./phase-5-marketing-ux.md) | Phase 5: UX components, analytics events, accessibility notes |
+| [website-revamp-phase-1-audit.md](./website-revamp-phase-1-audit.md) | Phase 1: marketing site audit, SEO map, messaging pillars, copy prompt |
 | [phase-7.6-disaster-recovery-bc.md](./phase-7.6-disaster-recovery-bc.md) | Phase 7.6 DR/BC: RTO/RPO, backups, drills, comms |
 | [phase-7.5-monitoring-alerting.md](./phase-7.5-monitoring-alerting.md) | Phase 7.5 monitoring, alerting, SLOs, incident alignment |
 | [phase-7.4-scalability-ha.md](./phase-7.4-scalability-ha.md) | Phase 7.4 scalability, HA, DR (app + platform mapping) |

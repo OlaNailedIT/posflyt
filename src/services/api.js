@@ -109,6 +109,27 @@ api.interceptors.response.use(
 
     const status = error.response?.status;
     const config = error.config;
+    if (status === 429 || apiCode === "QUOTA_EXCEEDED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "Usage limit reached. Upgrade for more capacity.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+    if (status === 403 && apiCode === "FEATURE_DISABLED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "This feature is not enabled for your plan.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+    if (status === 402 || apiCode === "PAYMENT_REQUIRED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "Choose a plan to continue using this feature.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
     if (status !== 401 || !config) {
       return Promise.reject(error);
     }
@@ -206,6 +227,108 @@ export async function postAdminDailyClose() {
   return unwrap(data);
 }
 
+export async function getAdminBillingOverview() {
+  const { data } = await api.get("/admin/billing-overview");
+  return unwrap(data);
+}
+
+export async function getAdminBillingWebhookEvents(params) {
+  const { data } = await api.get("/admin/billing-webhook-events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminPaymentsQuery(params) {
+  const { data } = await api.get("/admin/payments-query", { params });
+  return unwrap(data);
+}
+
+export async function postAdminPaymentRetriesRun() {
+  const { data } = await api.post("/admin/payment-retries/run");
+  return unwrap(data);
+}
+
+export async function getAdminPaymentsReconcile() {
+  const { data } = await api.get("/admin/payments/reconcile");
+  return unwrap(data);
+}
+
+export async function postAdminPaymentsReconcileApply() {
+  const { data } = await api.post("/admin/payments/reconcile/apply");
+  return unwrap(data);
+}
+
+/** Phase 7.2: `/api/admin/*` monitoring (JWT + admin; read-only except optional alert test). */
+export async function getAdminSyncSummary() {
+  const { data } = await api.get("/api/admin/sync-summary");
+  return unwrap(data);
+}
+
+export async function getAdminTransactions(params) {
+  const { data } = await api.get("/api/admin/transactions", { params });
+  return unwrap(data);
+}
+
+export async function getAdminTransaction(id) {
+  const { data } = await api.get(`/api/admin/transactions/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function getAdminEvents(params) {
+  const { data } = await api.get("/api/admin/events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminEvent(id) {
+  const { data } = await api.get(`/api/admin/events/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function getAdminPayments(params) {
+  const { data } = await api.get("/api/admin/payments", { params });
+  return unwrap(data);
+}
+
+export async function getAdminWebhookEvents(params) {
+  const { data } = await api.get("/api/admin/webhook-events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminOperationalErrors(params) {
+  const { data } = await api.get("/api/admin/errors", { params });
+  return unwrap(data);
+}
+
+export async function getAdminMonitoringAlerts() {
+  const { data } = await api.get("/api/admin/monitoring-alerts");
+  return unwrap(data);
+}
+
+export async function postAdminAlertTest(payload) {
+  const { data } = await api.post("/api/admin/alerts/test", payload ?? {});
+  return unwrap(data);
+}
+
+/** Phase 7.3: BI (BASIC+ plan, manager or admin). */
+export async function getBiSnapshot(params) {
+  const { data } = await api.get("/api/bi/snapshot", { params });
+  return unwrap(data);
+}
+
+export async function getBiTransactions(params) {
+  const { data } = await api.get("/api/bi/transactions", { params });
+  return unwrap(data);
+}
+
+export async function getBiTransaction(id) {
+  const { data } = await api.get(`/api/bi/transactions/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function postBiSlackSummary(payload) {
+  const { data } = await api.post("/api/bi/reports/slack-summary", payload ?? {});
+  return unwrap(data);
+}
+
 export async function getCustomers() {
   const { data } = await api.get("/customers");
   return unwrap(data);
@@ -295,6 +418,50 @@ export async function confirmBillingPayment(payload) {
 export async function getPaymentHistory() {
   const { data } = await api.get("/billing/payment-history");
   return unwrap(data);
+}
+
+export async function postCancelSubscription() {
+  const { data } = await api.post("/billing/cancel");
+  return unwrap(data);
+}
+
+export async function getBillingLifecycleEvents() {
+  const { data } = await api.get("/billing/lifecycle-events");
+  return unwrap(data);
+}
+
+export async function getBillingLifecycleMetrics() {
+  const { data } = await api.get("/billing/lifecycle-metrics");
+  return unwrap(data);
+}
+
+/** Phase 7.5: usage quotas, loyalty snapshot, upsell hints. */
+export async function getUsageSummary() {
+  const { data } = await api.get("/usage/summary");
+  return unwrap(data);
+}
+
+/** Phase 7.5: resolved feature flags for current plan + A/B bucket. */
+export async function getUsageFeatures() {
+  const { data } = await api.get("/usage/features");
+  return unwrap(data);
+}
+
+/** Phase 8: newsletter / lead capture (CRM hooks in ops). */
+export async function postMarketingLead(payload) {
+  const { data } = await api.post("/marketing/leads", payload);
+  return unwrap(data);
+}
+
+export async function downloadBillingPaymentsCsv() {
+  const response = await api.get("/billing/export/payments.csv", { responseType: "blob" });
+  const blob = response.data;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "payments.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function getAuditLogs() {

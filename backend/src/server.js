@@ -2,9 +2,13 @@
 require("./config/env");
 const app = require("./app");
 const prisma = require("./config/prisma");
-const { port } = require("./config/env");
+const { port, queueEnabled, redisUrl } = require("./config/env");
 const { startBackupScheduler } = require("./services/backupService");
 const { startInventoryIntegrityMonitor } = require("./services/inventoryIntegrityService");
+const { scheduleQueueJobsIfEnabled } = require("./jobs/scheduleOnBoot");
+const { processDuePaymentRetries } = require("./services/paymentRetryService");
+const { quitRedis, pingRedis, isRedisConfigured } = require("./config/redis");
+const { disconnectReadPrisma } = require("./config/prismaRead");
 const { logger } = require("./utils/logger");
 const { initSentry } = require("./utils/sentry");
 
@@ -22,12 +26,27 @@ process.on("uncaughtException", (err) => {
 async function main() {
   logger.info({ service: "posflyt-backend" }, "Starting POSflyt backend");
 
+  if (queueEnabled && !redisUrl) {
+    logger.error("QUEUE_ENABLED=true requires REDIS_URL — aborting startup");
+    process.exit(1);
+  }
+
   try {
     await prisma.$connect();
     logger.info("Database client connected");
   } catch (err) {
     logger.error({ err }, "Database connection failed");
     process.exit(1);
+  }
+
+  if (isRedisConfigured()) {
+    try {
+      await pingRedis();
+      logger.info("Redis reachable");
+    } catch (err) {
+      logger.error({ err: err.message }, "Redis ping failed — aborting startup");
+      process.exit(1);
+    }
   }
 
   const server = app.listen(port, () => {
@@ -37,7 +56,25 @@ async function main() {
   startBackupScheduler();
   startInventoryIntegrityMonitor();
 
+  try {
+    await scheduleQueueJobsIfEnabled();
+  } catch (e) {
+    logger.error({ err: e.message }, "scheduleQueueJobsIfEnabled failed");
+  }
+
+  if (!queueEnabled || !redisUrl) {
+    const intervalMs = 120_000;
+    setInterval(() => {
+      processDuePaymentRetries().catch((e) => {
+        logger.error({ err: e.message }, "payment retry interval failed");
+      });
+    }, intervalMs);
+    logger.info({ intervalMs }, "Fallback retry scheduler active");
+  }
+
   async function shutdown() {
+    await quitRedis();
+    await disconnectReadPrisma();
     await prisma.$disconnect();
     server.close(() => process.exit(0));
   }

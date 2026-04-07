@@ -11,6 +11,8 @@ import { useNotificationStore } from "../stores/notificationStore";
 import { useOnboardingStatus } from "../hooks/useOnboarding";
 import ExpandableSection from "../components/ui/ExpandableSection";
 import { useOfflineSync } from "../hooks/useOfflineSync";
+import { useSubscription } from "../hooks/useBilling";
+import SubscriptionBanner from "../components/SubscriptionBanner";
 import { useAdminDailyClose, useReliabilitySummary } from "../hooks/useSystem";
 import { useToastStore } from "../stores/toastStore";
 
@@ -49,7 +51,11 @@ function getConfidence(summary) {
 }
 
 export default function DashboardPage() {
-  const { data: stats, isLoading, isError } = useDashboardStats();
+  const { data: stats, isLoading, isError, error } = useDashboardStats();
+  const { data: subscription } = useSubscription();
+  const subscriptionBlocked =
+    (subscription && subscription.subscriptionActive === false) ||
+    (isError && error?.response?.status === 403);
   const isOnline = useOfflineStore((s) => s.isOnline);
   const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
@@ -120,6 +126,26 @@ export default function DashboardPage() {
           mode: {pendingTransactions > 0 ? "includes pending local sales" : "synced-only"}
         </p>
       </header>
+
+      {subscription && <SubscriptionBanner subscription={subscription} />}
+
+      {subscriptionBlocked && (
+        <div
+          className="rounded-lg border border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-100"
+          role="alert"
+        >
+          <p className="font-semibold">Subscription or trial inactive</p>
+          <p className="mt-1 text-xs opacity-90">
+            Choose a plan to restore full dashboard and analytics access.
+          </p>
+          <Link
+            to="/billing"
+            className="mt-2 inline-flex rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 dark:bg-teal-500 dark:text-stone-950"
+          >
+            View billing
+          </Link>
+        </div>
+      )}
 
       {failedTransactions > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">

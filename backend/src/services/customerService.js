@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const { logger } = require("../utils/logger");
 const { sanitizeDisplayName, normalizeEmail, sanitizePlainText } = require("../utils/sanitize");
+const { assertCustomerQuota } = require("./usageQuotaService");
 
 async function listCustomers(businessId) {
   return prisma.customer.findMany({
@@ -9,7 +10,8 @@ async function listCustomers(businessId) {
   });
 }
 
-async function createCustomer(businessId, payload) {
+async function createCustomer(businessId, payload, userId) {
+  await assertCustomerQuota(businessId, { userId });
   const { id, ...rest } = payload;
   const name = sanitizeDisplayName(rest.name, 200);
   const email =

@@ -25,7 +25,8 @@ export function useDashboardStats() {
           const data = await getDashboardStats();
           await saveDashboardCache(data);
           return data;
-        } catch {
+        } catch (e) {
+          if (e?.response?.status === 403) throw e;
           const cached = await getDashboardCache();
           return cached || fallback;
         }

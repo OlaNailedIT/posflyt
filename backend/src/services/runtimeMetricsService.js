@@ -23,6 +23,12 @@ const state = {
   httpDurationHist: new Map(),
   /** Golden signal: saturation — mean event-loop lag (seconds), last sample window (Phase 7.5). */
   eventLoopDelayMeanSeconds: 0,
+  /** Billing / webhooks (Phase 7.1 hardening). */
+  billing: {
+    failedPaymentsCount: 0,
+    retryAttemptsCount: 0,
+    webhookFailuresCount: 0,
+  },
 };
 
 const eventLoopHistogram = monitorEventLoopDelay({ resolution: 20 });
@@ -67,6 +73,18 @@ function routeGroupFromPath(path) {
 
 function incrementApi5xx() {
   state.api5xxCount += 1;
+}
+
+function incrementBillingFailedPayments(delta = 1) {
+  state.billing.failedPaymentsCount += delta;
+}
+
+function incrementBillingRetryAttempts(delta = 1) {
+  state.billing.retryAttemptsCount += delta;
+}
+
+function incrementBillingWebhookFailures(delta = 1) {
+  state.billing.webhookFailuresCount += delta;
 }
 
 function recordSyncRetryResolution(resolutionMs) {
@@ -192,6 +210,18 @@ function getPrometheusMetricsText() {
   lines.push("# TYPE posflyt_process_start_time_seconds gauge");
   lines.push(`posflyt_process_start_time_seconds ${Math.floor(state.startedAtMs / 1000)}`);
 
+  lines.push("# HELP posflyt_billing_failed_payments_total Payments marked failed (gateway or stale timeout).");
+  lines.push("# TYPE posflyt_billing_failed_payments_total counter");
+  lines.push(`posflyt_billing_failed_payments_total ${state.billing.failedPaymentsCount}`);
+
+  lines.push("# HELP posflyt_billing_retry_attempts_total Payment retry worker attempts (per payment processed).");
+  lines.push("# TYPE posflyt_billing_retry_attempts_total counter");
+  lines.push(`posflyt_billing_retry_attempts_total ${state.billing.retryAttemptsCount}`);
+
+  lines.push("# HELP posflyt_billing_webhook_failures_total Webhook signature verification failures.");
+  lines.push("# TYPE posflyt_billing_webhook_failures_total counter");
+  lines.push(`posflyt_billing_webhook_failures_total ${state.billing.webhookFailuresCount}`);
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -211,6 +241,7 @@ function getRuntimeMetrics() {
     api5xxCount: state.api5xxCount,
     httpSlowRequestsTotal: state.httpSlowTotal,
     startedAt: state.startedAt,
+    billing: { ...state.billing },
     syncRetryResolution: { ...state.syncRetryResolution },
     httpRequestCountTotal,
     uptimeSeconds: process.uptime(),
@@ -222,6 +253,9 @@ function getRuntimeMetrics() {
 
 module.exports = {
   incrementApi5xx,
+  incrementBillingFailedPayments,
+  incrementBillingRetryAttempts,
+  incrementBillingWebhookFailures,
   recordSyncRetryResolution,
   recordHttpRequest,
   getRuntimeMetrics,

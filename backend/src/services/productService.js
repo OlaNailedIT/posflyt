@@ -1,6 +1,7 @@
 const { randomUUID } = require("crypto");
 const prisma = require("../config/prisma");
-const { PLAN_LIMITS, ensureBusinessSubscription } = require("./subscriptionService");
+const { ensureBusinessSubscription } = require("./subscriptionService");
+const { assertProductQuota } = require("./usageQuotaService");
 const { markFirstProductDone } = require("./onboardingService");
 const { logAudit } = require("./auditService");
 const { logger } = require("../utils/logger");
@@ -14,14 +15,8 @@ async function listProducts(businessId) {
 }
 
 async function createProduct(businessId, payload, userId) {
-  const subscription = await ensureBusinessSubscription(businessId);
-  const maxProducts = PLAN_LIMITS[subscription.plan]?.maxProducts || PLAN_LIMITS.FREE.maxProducts;
-  const productsCount = await prisma.product.count({ where: { businessId } });
-  if (productsCount >= maxProducts) {
-    const error = new Error(`Plan limit reached. ${subscription.plan} allows up to ${maxProducts} products.`);
-    error.statusCode = 403;
-    throw error;
-  }
+  await ensureBusinessSubscription(businessId);
+  await assertProductQuota(businessId, { userId });
 
   const { id, ...rest } = payload;
   const sellingPrice = rest.sellingPrice ?? rest.price ?? 0;

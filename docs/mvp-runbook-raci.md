@@ -108,37 +108,41 @@ Track these when closing Phase 6.1 (sync hardening).
 
 | Done | Item |
 |------|------|
-| [ ] | Client sync state machine implemented |
-| [ ] | Failed transactions retryable |
-| [ ] | Sync UI indicators visible |
-| [ ] | Global sync indicator added |
+| [x] | Client sync state machine implemented |
+| [x] | Failed transactions retryable |
+| [x] | Sync UI indicators visible |
+| [x] | Global sync indicator added |
 | [ ] | Offline → online sync tested |
 
 **Evidence:** `src/constants/syncStatus.js`, `src/services/db.js` (queue fields), `src/hooks/useOfflineSync.js`, `src/pages/PosPage.jsx`, `src/components/SyncStatusIndicator.jsx`.
+
+**Note:** Keep the last row as manual/E2E proof when you have a repeatable test or runbook capture.
 
 ### Phase 6.3 — Sync performance (checklist)
 
 | Done | Item |
 |------|------|
-| [ ] | Batch sync implemented |
-| [ ] | Exponential backoff working |
-| [ ] | Retry prioritization working |
-| [ ] | No duplicate sync runs |
+| [x] | Batch sync implemented |
+| [x] | Exponential backoff working |
+| [x] | Retry prioritization working |
+| [x] | No duplicate sync runs |
 | [ ] | Queue drains fully under load |
 
 **Evidence:** `src/hooks/useOfflineSync.js` (`BATCH_SIZE`, `CONCURRENCY`, `runSync`, `runWithLimit`), `src/services/db.js` (`getPendingQueuedTransactions`, `bumpTransactionRetryNow`, backoff on failure).
+
+**Note:** “Queue drains fully under load” remains the stretch **load-test** criterion; mark when you have a scripted or manual evidence run.
 
 ### Phase 6.4 — Conflict resolution & data integrity (checklist)
 
 | Done | Item |
 |------|------|
-| [ ] | Conflict strategy defined (ADR 004) |
-| [ ] | `lastKnownUpdatedAt` enforced on product and customer updates |
-| [ ] | Conflict responses returned (`code: CONFLICT`, `data` with server/client timestamps) |
-| [ ] | UI handles conflict errors (refresh messaging + list invalidation) |
-| [ ] | Inventory protected from negative stock (`INSUFFICIENT_STOCK` on oversell) |
+| [x] | Conflict strategy defined (ADR 004) |
+| [x] | `lastKnownUpdatedAt` enforced on product and customer updates |
+| [x] | Conflict responses returned (`code: CONFLICT`, `data` with server/client timestamps) |
+| [x] | UI handles conflict errors (refresh messaging + list invalidation) |
+| [x] | Inventory protected from negative stock (`INSUFFICIENT_STOCK` on oversell) |
 
-**Evidence:** `docs/adr/004-conflict-resolution.md`, `backend/src/services/productService.js`, `backend/src/services/customerService.js`, `backend/src/middlewares/errorHandler.js`, `backend/src/services/transactionService.js`, `src/pages/InventoryPage.jsx`, `src/pages/CustomersPage.jsx`.
+**Evidence:** `docs/adr/004-conflict-resolution.md`, `backend/src/services/productService.js`, `backend/src/services/customerService.js`, `backend/src/middlewares/errorHandler.js`, `backend/src/services/transactionService.js`, `src/pages/InventoryPage.jsx`, `src/pages/CustomersPage.jsx`, `src/components/ConflictResolutionHost.jsx`, `src/components/ConflictResolutionModal.jsx`, `src/stores/conflictStore.js`.
 
 ---
 
@@ -153,3 +157,4 @@ Track these when closing Phase 6.1 (sync hardening).
 | 2026-04-07 | Phase 6.2: client sync state machine checklist (IndexedDB + POS + header indicator) |
 | 2026-04-07 | Phase 6.3: batch sync + backoff + concurrency checklist |
 | 2026-04-07 | Phase 7.6: DR/BC doc link in runbook |
+| 2026-04-07 | Phase 6.2–6.4: checklist aligned with implemented code (6.2/6.3 E2E load items left open) |

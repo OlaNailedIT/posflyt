@@ -57,29 +57,37 @@ async function processSingleTransaction(tx, businessId, userId, payload) {
     throw error;
   }
 
-  if (client_transaction_id) {
-    const existing = await tx.transaction.findUnique({
-      where: { id: client_transaction_id },
-      include: {
-        items: {
-          include: { product: { select: { id: true, name: true, barcode: true } } },
-        },
+  const existingForBusiness = await tx.transaction.findUnique({
+    where: {
+      client_transaction_id_business_id: {
+        id: transactionId,
+        businessId,
       },
-    });
-    if (existing) {
-      if (existing.businessId !== businessId) {
-        const error = new Error("Transaction belongs to another business");
-        error.statusCode = 403;
-        error.location = location;
-        throw error;
-      }
-      return {
-        status: "duplicate",
-        code: "DUPLICATE_ID",
-        transaction: existing,
-        syncTimestamp: existing.syncedAt || existing.createdAt,
-      };
-    }
+    },
+    include: {
+      items: {
+        include: { product: { select: { id: true, name: true, barcode: true } } },
+      },
+    },
+  });
+  if (existingForBusiness) {
+    return {
+      status: "duplicate",
+      code: "DUPLICATE_ID",
+      transaction: existingForBusiness,
+      syncTimestamp: existingForBusiness.syncedAt || existingForBusiness.createdAt,
+    };
+  }
+
+  const existingOtherBusiness = await tx.transaction.findUnique({
+    where: { id: transactionId },
+    select: { id: true, businessId: true },
+  });
+  if (existingOtherBusiness) {
+    const error = new Error("Transaction belongs to another business");
+    error.statusCode = 403;
+    error.location = location;
+    throw error;
   }
 
   const productIds = items.map((item) => item.product_id);

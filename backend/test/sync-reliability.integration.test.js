@@ -58,6 +58,8 @@ test("transaction idempotency + stock integrity", async () => {
   assert.equal(first.body.data.synced, 1);
   assert.equal(first.body.data.duplicates, 0);
   assert.equal(first.body.data.failed, 0);
+  assert.equal(first.body.data.syncStatus, "applied");
+  assert.equal(first.body.data.clientTransactionId, txId);
 
   const duplicate = await request(app)
     .post("/transactions")
@@ -67,6 +69,7 @@ test("transaction idempotency + stock integrity", async () => {
   assert.equal(duplicate.body.data.synced, 0);
   assert.equal(duplicate.body.data.duplicates, 1);
   assert.equal(duplicate.body.data.failed, 0);
+  assert.equal(duplicate.body.data.syncStatus, "duplicate");
 
   const list = await request(app).get("/transactions").set("Authorization", `Bearer ${token}`);
   assert.equal(list.status, 200);

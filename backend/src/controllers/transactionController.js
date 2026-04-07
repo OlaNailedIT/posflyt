@@ -23,6 +23,37 @@ const bulkSchema = z.object({
   transactions: z.array(transactionSchema).min(1),
 });
 
+/** ADR 003: attach contract fields without dropping legacy `status`, `receipt`, etc. */
+function augmentSyncResult(result, clientTransactionId) {
+  const transactionId =
+    result.transactionId ?? result.transaction?.id ?? undefined;
+  if (result.status === "duplicate") {
+    return {
+      ...result,
+      transactionId,
+      clientTransactionId,
+      syncStatus: "duplicate",
+    };
+  }
+  if (result.status === "created") {
+    return {
+      ...result,
+      transactionId,
+      clientTransactionId,
+      syncStatus: "applied",
+    };
+  }
+  if (result.status === "failed") {
+    return {
+      ...result,
+      transactionId,
+      clientTransactionId,
+      syncStatus: "failed",
+    };
+  }
+  return result;
+}
+
 async function postTransaction(req, res, next) {
   try {
     const payload = Array.isArray(req.body)
@@ -38,26 +69,43 @@ async function postTransaction(req, res, next) {
       validated.transactions
     );
 
-    const failed = results.filter((r) => r.status === "failed").length;
-    const statusCode = failed ? 207 : 201;
-    return sendOk(
-      res,
-      {
-      synced: results.filter((r) => r.status === "created").length,
-      duplicates: results.filter((r) => r.status === "duplicate").length,
-      failed,
-      results,
-      },
-      statusCode
+    const augmented = validated.transactions.map((tx, i) =>
+      augmentSyncResult(results[i], tx.client_transaction_id)
     );
+
+    const failed = augmented.filter((r) => r.status === "failed").length;
+    const statusCode = failed ? 207 : 201;
+
+    const data = {
+      synced: augmented.filter((r) => r.status === "created").length,
+      duplicates: augmented.filter((r) => r.status === "duplicate").length,
+      failed,
+      results: augmented,
+    };
+
+    if (validated.transactions.length === 1) {
+      const only = augmented[0];
+      data.transactionId = only.transactionId;
+      data.clientTransactionId = only.clientTransactionId;
+      data.syncStatus = only.syncStatus;
+    }
+
+    return sendOk(res, data, statusCode);
   } catch (error) {
     if (error.name === "ZodError") {
+      const clientTransactionId =
+        typeof req.body?.client_transaction_id === "string"
+          ? req.body.client_transaction_id
+          : undefined;
       return sendError(res, {
         statusCode: 400,
         code: "VALIDATION_FAILED",
         message: "Validation failed",
         location: "controllers/transactionController.postTransaction",
         details: { requestId: req.requestId, errors: error.issues },
+        ...(clientTransactionId
+          ? { data: { clientTransactionId } }
+          : {}),
       });
     }
     return next(error);

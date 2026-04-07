@@ -114,6 +114,9 @@ model Transaction {
   store         Store?            @relation(fields: [storeId], references: [id])
   user          User              @relation(fields: [userId], references: [id])
   items         TransactionItem[]
+
+  // client_transaction_id is stored as `id`; idempotency scoped to business (ADR 003).
+  @@unique([id, businessId], name: "client_transaction_id_business_id")
 }
 
 model TransactionItem {

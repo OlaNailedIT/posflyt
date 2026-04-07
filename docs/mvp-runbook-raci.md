@@ -112,6 +112,18 @@ Track these when closing Phase 6.1 (sync hardening).
 
 **Evidence:** `src/constants/syncStatus.js`, `src/services/db.js` (queue fields), `src/hooks/useOfflineSync.js`, `src/pages/PosPage.jsx`, `src/components/SyncStatusIndicator.jsx`.
 
+### Phase 6.3 — Sync performance (checklist)
+
+| Done | Item |
+|------|------|
+| [ ] | Batch sync implemented |
+| [ ] | Exponential backoff working |
+| [ ] | Retry prioritization working |
+| [ ] | No duplicate sync runs |
+| [ ] | Queue drains fully under load |
+
+**Evidence:** `src/hooks/useOfflineSync.js` (`BATCH_SIZE`, `CONCURRENCY`, `runSync`, `runWithLimit`), `src/services/db.js` (`getPendingQueuedTransactions`, `bumpTransactionRetryNow`, backoff on failure).
+
 ---
 
 ## Revision
@@ -123,3 +135,4 @@ Track these when closing Phase 6.1 (sync hardening).
 | 2026-04-05 | Phase 3.1: `prisma validate` in CI, Node engines + `.nvmrc`, `deployment-phase-3.1.md` |
 | 2026-04-07 | Phase 6.1: sync contract checklist + standardized API response helpers |
 | 2026-04-07 | Phase 6.2: client sync state machine checklist (IndexedDB + POS + header indicator) |
+| 2026-04-07 | Phase 6.3: batch sync + backoff + concurrency checklist |

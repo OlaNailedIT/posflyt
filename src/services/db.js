@@ -183,6 +183,32 @@ export async function getFailedQueuedTransactions() {
   return rows.filter((r) => resolveSyncStatus(r) === SYNC_STATUS.FAILED);
 }
 
+/** Eligible transaction rows for sync (not synced, not syncing; respects nextRetryAt unless caller uses force in hook). */
+export async function getPendingQueuedTransactions() {
+  const rows = await getQueuedTransactions();
+  const now = Date.now();
+  return rows.filter((r) => {
+    const s = resolveSyncStatus(r);
+    if (s === SYNC_STATUS.SYNCED || s === SYNC_STATUS.SYNCING) return false;
+    if (s === SYNC_STATUS.FAILED) return Number(r.nextRetryAt || 0) <= now;
+    if (s === SYNC_STATUS.PENDING) return Number(r.nextRetryAt || 0) <= now;
+    return false;
+  });
+}
+
+/** Manual retry: make row eligible for the next sync pass. */
+export async function bumpTransactionRetryNow(id) {
+  const db = await getDb();
+  const row = await db.get(STORES.transactionsQueue, id);
+  if (!row) return null;
+  const next = {
+    ...normalizeQueuedTransaction(row),
+    nextRetryAt: Date.now(),
+  };
+  await db.put(STORES.transactionsQueue, next);
+  return next;
+}
+
 export async function getQueuedOutbox() {
   const db = await getDb();
   const rows = await db.getAll(STORES.outbox);
@@ -275,8 +301,7 @@ export async function markQueuedTransactionFailed(id, errorMessage, errorCode = 
   const row = await db.get(STORES.transactionsQueue, id);
   if (!row) return null;
   const retryCount = Number(row.retryCount || 0) + 1;
-  const jitter = Math.floor(Math.random() * 1500);
-  const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(retryCount - 1, 5))) + jitter;
+  const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
   const msg = errorMessage || "Sync failed";
   const now = Date.now();
   const next = {
@@ -316,8 +341,7 @@ export async function markOutboxFailed(id, errorMessage, errorCode = null) {
   const row = await db.get(STORES.outbox, id);
   if (!row) return null;
   const retryCount = Number(row.retryCount || 0) + 1;
-  const jitter = Math.floor(Math.random() * 1500);
-  const delayMs = Math.min(60_000, 2000 * Math.pow(2, Math.min(retryCount - 1, 5))) + jitter;
+  const delayMs = Math.min(60_000, 2000 * Math.pow(2, retryCount));
   const next = {
     ...row,
     status: "failed",

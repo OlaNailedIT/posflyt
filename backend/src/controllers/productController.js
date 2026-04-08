@@ -2,18 +2,26 @@ const { z } = require("zod");
 const { listProducts, createProduct, updateProduct } = require("../services/productService");
 const { sendOk, sendError } = require("../utils/http");
 
-const createSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z.string().min(2),
-  price: z.coerce.number().nonnegative(),
-  costPrice: z.coerce.number().nonnegative().optional(),
-  sellingPrice: z.coerce.number().nonnegative().optional(),
-  stock: z.coerce.number().int().nonnegative(),
-  lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
-  barcode: z.string().min(3).optional(),
-});
+const createSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    name: z.string().min(2),
+    price: z.coerce.number().nonnegative(),
+    costPrice: z.coerce.number().nonnegative().optional(),
+    sellingPrice: z.coerce.number().nonnegative().optional(),
+    stock: z.coerce.number().int().nonnegative(),
+    lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
+    barcode: z.string().min(3).optional(),
+  })
+  .strict();
 
-const updateSchema = createSchema.partial();
+const updateSchema = createSchema.partial().extend({
+  lastKnownUpdatedAt: z
+    .string()
+    .min(1, "lastKnownUpdatedAt is required")
+    .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Invalid lastKnownUpdatedAt" }),
+  force: z.boolean().optional(),
+}).strict();
 
 async function getProducts(req, res, next) {
   try {

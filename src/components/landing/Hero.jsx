@@ -10,8 +10,8 @@ export default function Hero() {
       <h1 className="text-4xl font-black leading-tight text-stone-900 md:text-6xl dark:text-stone-100">
         {CORE_POSITIONING}
       </h1>
-      <p className="mx-auto mt-5 max-w-2xl text-stone-600 dark:text-stone-400">
-        POSflyt helps you record every sale, keep stock correct, and recover safely from network outages.
+      <p className="mx-auto mt-5 max-w-xl text-lg font-medium text-stone-700 dark:text-stone-300">
+        Sell offline. Sync when you&apos;re back online. Stock you can trust.
       </p>
       <ul className="mx-auto mt-3 max-w-2xl space-y-1 text-left text-sm text-stone-700 dark:text-stone-300">
         {RELIABILITY_OUTCOMES.map((outcome) => (

@@ -7,9 +7,324 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-//////////////////////////////////////
-// ENUMS
-//////////////////////////////////////
+model Business {
+  id             String              @id @default(uuid())
+  name           String
+  createdAt      DateTime            @default(now())
+  auditLogs      AuditLog[]
+  backups        BackupRecord[]
+  customers      Customer[]
+  issues         IssueReport[]
+  onboarding     OnboardingProgress?
+  paymentHistory PaymentHistory[]
+  products       Product[]
+  settings       Settings?
+  smartAlerts    SmartAlert[]
+  stores         Store[]
+  subscription   Subscription?
+  transactions   Transaction[]
+  usageMonthly   UsageMonthly[]
+  users          User[]
+}
+
+model User {
+  id            String          @id @default(uuid())
+  name          String
+  email         String          @unique
+  password      String
+  role          Role            @default(CASHIER)
+  createdAt     DateTime        @default(now())
+  businessId    String
+  sessions      ActiveSession[]
+  auditLogs     AuditLog[]
+  issues        IssueReport[]
+  refreshTokens RefreshToken[]
+  transactions  Transaction[]
+  business      Business        @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  sessionJti String?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Store {
+  id           String        @id @default(uuid())
+  name         String
+  location     String?
+  createdAt    DateTime      @default(now())
+  businessId   String
+  products     Product[]
+  business     Business      @relation(fields: [businessId], references: [id])
+  transactions Transaction[]
+
+  @@index([businessId])
+}
+
+model Product {
+  id                String            @id
+  name              String
+  costPrice         Float             @default(0)
+  sellingPrice      Float             @default(0)
+  price             Float
+  stock             Int
+  lowStockThreshold Int               @default(10)
+  barcode           String?           @unique
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  businessId        String
+  storeId           String?
+  business          Business          @relation(fields: [businessId], references: [id])
+  store             Store?            @relation(fields: [storeId], references: [id])
+  transactionItems  TransactionItem[]
+
+  @@index([businessId])
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  name         String
+  email        String?
+  phone        String?
+  createdAt    DateTime      @default(now())
+  businessId   String
+  updatedAt    DateTime      @default(now()) @updatedAt
+  business     Business      @relation(fields: [businessId], references: [id])
+  transactions Transaction[]
+
+  @@index([businessId])
+}
+
+model Transaction {
+  id            String            @id
+  total         Float
+  paymentMethod PaymentMethod
+  createdAt     DateTime
+  syncedAt      DateTime?
+  syncStatus    SyncStatus        @default(PENDING)
+  businessId    String
+  userId        String
+  storeId       String?
+  customerId    String?
+  business      Business          @relation(fields: [businessId], references: [id])
+  customer      Customer?         @relation(fields: [customerId], references: [id])
+  store         Store?            @relation(fields: [storeId], references: [id])
+  user          User              @relation(fields: [userId], references: [id])
+  items         TransactionItem[]
+
+  @@unique([id, businessId], map: "Transaction_client_transaction_id_business_id_key")
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+model TransactionItem {
+  id            String      @id @default(uuid())
+  quantity      Int
+  price         Float
+  transactionId String
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id])
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId])
+  @@index([productId])
+}
+
+model Settings {
+  id             String   @id @default(uuid())
+  countryCode    String   @default("US")
+  currencyCode   String   @default("USD")
+  currencySymbol String   @default("$")
+  taxEnabled     Boolean  @default(false)
+  taxRate        Float    @default(0)
+  taxRules       Json?
+  businessName   String
+  businessEmail  String
+  businessPhone  String?
+  logoUrl        String?
+  receiptLayout  String?  @default("STANDARD")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  businessId     String   @unique
+  business       Business @relation(fields: [businessId], references: [id])
+}
+
+/// DB-backed feature toggles (Phase 7.5); seeded in migration.
+model FeatureFlag {
+  id               String   @id @default(uuid())
+  key              String   @unique
+  label            String?
+  freeEnabled      Boolean  @default(false)
+  basicEnabled     Boolean  @default(false)
+  premiumEnabled   Boolean  @default(false)
+  abRolloutPercent Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model UsageMonthly {
+  id              String   @id @default(uuid())
+  businessId      String
+  yearMonth       String
+  apiRequestCount Int      @default(0)
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, yearMonth])
+  @@index([businessId])
+}
+
+model Subscription {
+  id           String             @id @default(uuid())
+  plan         SubscriptionPlan   @default(FREE)
+  status       SubscriptionStatus @default(ACTIVE)
+  provider     String?
+  externalRef  String?
+  expiresAt    DateTime?
+  featureFlags Json?
+  usageLimits  Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  businessId   String             @unique
+  /// Optional FREE trial end for new signups when BILLING_TRIAL_DAYS is set; null = legacy unlimited FREE.
+  trialEndsAt  DateTime?
+  business     Business           @relation(fields: [businessId], references: [id])
+}
+
+model OnboardingProgress {
+  id               String   @id @default(uuid())
+  firstProductDone Boolean  @default(false)
+  firstSaleDone    Boolean  @default(false)
+  lastActiveAt     DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  businessId       String   @unique
+  business         Business @relation(fields: [businessId], references: [id])
+}
+
+model SmartAlert {
+  id         String    @id @default(uuid())
+  type       AlertType
+  message    String
+  alertDate  DateTime
+  createdAt  DateTime  @default(now())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, type, alertDate])
+  @@index([businessId])
+}
+
+model PaymentHistory {
+  id              String           @id @default(uuid())
+  provider        String
+  providerRef     String
+  plan            SubscriptionPlan
+  amount          Float
+  currency        String           @default("USD")
+  status          String
+  paidAt          DateTime?
+  createdAt       DateTime         @default(now())
+  businessId      String
+  /// API request id when checkout was created (correlation / support).
+  clientRequestId String?
+  /// Last gateway webhook event id applied to this row (if any).
+  gatewayEventId  String?
+  retryCount      Int              @default(0)
+  lastAttemptAt   DateTime?
+  /// When set, automated retry may run (exponential backoff from lastRetryAt).
+  nextRetryAt     DateTime?
+  failureReason   String?
+  business        Business         @relation(fields: [businessId], references: [id])
+
+  @@unique([provider, providerRef])
+  @@index([businessId])
+  @@index([status, nextRetryAt])
+  @@index([clientRequestId])
+}
+
+/// Idempotent gateway event ledger (unique provider + dedupeKey = one processed delivery).
+model BillingWebhookEvent {
+  id         String   @id @default(uuid())
+  provider   String
+  dedupeKey  String
+  businessId String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  /// SUCCESS | DUPLICATE | IGNORED | ERROR (best-effort for observability)
+  outcome    String?  @default("SUCCESS")
+
+  @@unique([provider, dedupeKey])
+  @@index([businessId])
+  @@index([createdAt])
+}
+
+model ActiveSession {
+  id         String    @id @default(uuid())
+  tokenJti   String    @unique
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  businessId String
+  userId     String?
+  business   Business @relation(fields: [businessId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+model BackupRecord {
+  id         String   @id @default(uuid())
+  filePath   String
+  sizeBytes  Int
+  status     String
+  createdAt  DateTime @default(now())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
+}
+
+model IssueReport {
+  id          String   @id @default(uuid())
+  subject     String
+  description String
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+  businessId  String
+  userId      String?
+  business    Business @relation(fields: [businessId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([businessId])
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
+}
 
 enum Role {
   ADMIN
@@ -45,266 +360,4 @@ enum SubscriptionStatus {
 enum AlertType {
   SALES_SPIKE
   SALES_DROP
-}
-
-//////////////////////////////////////
-// CORE MODELS
-//////////////////////////////////////
-
-model Business {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-
-  users        User[]
-  stores       Store[]
-  products     Product[]
-  customers    Customer[]
-  transactions Transaction[]
-  settings     Settings?
-  subscription Subscription?
-  onboarding   OnboardingProgress?
-  smartAlerts  SmartAlert[]
-  paymentHistory PaymentHistory[]
-  backups      BackupRecord[]
-  issues       IssueReport[]
-  auditLogs    AuditLog[]
-}
-
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(CASHIER)
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  transactions Transaction[]
-  sessions     ActiveSession[]
-  auditLogs    AuditLog[]
-  issues       IssueReport[]
-}
-
-model Store {
-  id        String   @id @default(uuid())
-  name      String
-  location  String?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  products     Product[]
-  transactions Transaction[]
-}
-
-//////////////////////////////////////
-// PRODUCT & INVENTORY
-//////////////////////////////////////
-
-model Product {
-  id        String   @id // client-generated UUID for offline support
-  name      String
-  costPrice Float    @default(0)
-  sellingPrice Float @default(0)
-  price     Float
-  stock     Int
-  lowStockThreshold Int @default(10)
-  barcode   String?  @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  storeId String?
-  store   Store? @relation(fields: [storeId], references: [id])
-
-  transactionItems TransactionItem[]
-}
-
-//////////////////////////////////////
-// CUSTOMERS (FOR CRM LATER)
-//////////////////////////////////////
-
-model Customer {
-  id        String   @id @default(uuid())
-  name      String
-  email     String?
-  phone     String?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  transactions Transaction[]
-}
-
-//////////////////////////////////////
-// TRANSACTIONS (CORE POS ENGINE)
-//////////////////////////////////////
-
-model Transaction {
-  id            String   @id // client-generated for offline sync
-  total         Float
-  paymentMethod PaymentMethod
-  createdAt     DateTime
-  syncedAt      DateTime?
-  syncStatus    SyncStatus @default(PENDING)
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String
-  user   User @relation(fields: [userId], references: [id])
-
-  storeId String?
-  store   Store? @relation(fields: [storeId], references: [id])
-
-  customerId String?
-  customer   Customer? @relation(fields: [customerId], references: [id])
-
-  items TransactionItem[]
-}
-
-model TransactionItem {
-  id       String @id @default(uuid())
-  quantity Int
-  price    Float
-
-  transactionId String
-  transaction   Transaction @relation(fields: [transactionId], references: [id])
-
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-}
-
-model Settings {
-  id             String   @id @default(uuid())
-  countryCode    String   @default("US")
-  currencyCode   String   @default("USD")
-  currencySymbol String   @default("$")
-  taxEnabled     Boolean  @default(false)
-  taxRate        Float    @default(0)
-  taxRules       Json?
-  businessName   String
-  businessEmail  String
-  businessPhone  String?
-  logoUrl        String?
-  receiptLayout  String?  @default("STANDARD")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model Subscription {
-  id           String           @id @default(uuid())
-  plan         SubscriptionPlan @default(FREE)
-  status       SubscriptionStatus @default(ACTIVE)
-  provider     String?
-  externalRef  String?
-  expiresAt    DateTime?
-  featureFlags Json?
-  usageLimits  Json?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model OnboardingProgress {
-  id               String   @id @default(uuid())
-  firstProductDone Boolean  @default(false)
-  firstSaleDone    Boolean  @default(false)
-  lastActiveAt     DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  businessId String   @unique
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model SmartAlert {
-  id        String    @id @default(uuid())
-  type      AlertType
-  message   String
-  alertDate DateTime
-  createdAt DateTime  @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  @@unique([businessId, type, alertDate])
-}
-
-model PaymentHistory {
-  id          String   @id @default(uuid())
-  provider    String
-  providerRef String
-  plan        SubscriptionPlan
-  amount      Float
-  currency    String   @default("USD")
-  status      String
-  paidAt      DateTime?
-  createdAt   DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model ActiveSession {
-  id         String   @id @default(uuid())
-  tokenJti   String   @unique
-  userAgent  String?
-  ipAddress  String?
-  createdAt  DateTime @default(now())
-  lastSeenAt DateTime @default(now())
-  revokedAt  DateTime?
-
-  userId String
-  user   User @relation(fields: [userId], references: [id])
-}
-
-model AuditLog {
-  id        String   @id @default(uuid())
-  action    String
-  metadata  Json?
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String?
-  user   User? @relation(fields: [userId], references: [id])
-}
-
-model BackupRecord {
-  id        String   @id @default(uuid())
-  filePath  String
-  sizeBytes Int
-  status    String
-  createdAt DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-}
-
-model IssueReport {
-  id          String   @id @default(uuid())
-  subject     String
-  description String
-  status      String   @default("OPEN")
-  createdAt   DateTime @default(now())
-
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
-
-  userId String?
-  user   User? @relation(fields: [userId], references: [id])
 }

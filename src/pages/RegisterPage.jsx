@@ -1,14 +1,18 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { registerRequest } from "../services/api";
 import { useToastStore } from "../stores/toastStore";
 import ThemeToggle from "../components/ThemeToggle";
 import { CORE_POSITIONING } from "../config/productMode";
+import { registerErrorMessage } from "../utils/authErrors";
+import { trackEvent, trackMetaConversion } from "../utils/analytics";
+import { getStoredAttribution } from "../utils/utmCapture";
 
 export default function RegisterPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const showToast = useToastStore((s) => s.showToast);
   const [businessName, setBusinessName] = useState("");
   const [name, setName] = useState("");
@@ -30,11 +34,15 @@ export default function RegisterPage() {
         token: data.token,
         user: data.user,
       });
+      trackEvent("sign_up", { method: "email", ...getStoredAttribution() });
+      trackMetaConversion("CompleteRegistration");
       showToast("Account created. Welcome to POSflyt.", "success");
-      navigate("/onboarding");
+      const next = searchParams.get("redirect");
+      navigate(
+        next && next.startsWith("/") && !next.startsWith("//") ? next : "/onboarding"
+      );
     } catch (err) {
-      const msg = err.response?.data?.message || "Registration failed.";
-      showToast(msg, "error");
+      showToast(registerErrorMessage(err), "error");
     } finally {
       setLoading(false);
     }

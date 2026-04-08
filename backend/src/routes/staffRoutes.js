@@ -10,11 +10,9 @@ const {
 
 const router = express.Router();
 
-router.use(requireAuth);
-router.use(requireAdmin);
-router.get("/staff", getStaff);
-router.post("/staff", postStaff);
-router.post("/staff/:id/disable", disableStaffMember);
-router.post("/staff/:id/reactivate", reactivateStaffMember);
+router.get("/staff", requireAuth, requireAdmin, getStaff);
+router.post("/staff", requireAuth, requireAdmin, postStaff);
+router.post("/staff/:id/disable", requireAuth, requireAdmin, disableStaffMember);
+router.post("/staff/:id/reactivate", requireAuth, requireAdmin, reactivateStaffMember);
 
 module.exports = router;

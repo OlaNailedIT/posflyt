@@ -1,11 +1,14 @@
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const { sendOk, sendError } = require("../utils/http");
+const { sanitizePlainText } = require("../utils/sanitize");
 
-const issueSchema = z.object({
-  subject: z.string().trim().min(3).max(120),
-  description: z.string().trim().min(5).max(5000),
-});
+const issueSchema = z
+  .object({
+    subject: z.string().trim().min(3).max(120),
+    description: z.string().trim().min(5).max(5000),
+  })
+  .strict();
 
 function getHelp(_req, res) {
   return sendOk(res, {
@@ -29,8 +32,8 @@ async function postIssue(req, res, next) {
       data: {
         businessId: req.auth.businessId,
         userId: req.auth.userId,
-        subject: payload.subject,
-        description: payload.description,
+        subject: sanitizePlainText(payload.subject, 120),
+        description: sanitizePlainText(payload.description, 5000),
       },
     });
     return sendOk(res, data, 201);

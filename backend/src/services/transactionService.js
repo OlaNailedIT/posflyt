@@ -57,29 +57,37 @@ async function processSingleTransaction(tx, businessId, userId, payload) {
     throw error;
   }
 
-  if (client_transaction_id) {
-    const existing = await tx.transaction.findUnique({
-      where: { id: client_transaction_id },
-      include: {
-        items: {
-          include: { product: { select: { id: true, name: true, barcode: true } } },
-        },
+  const existingForBusiness = await tx.transaction.findUnique({
+    where: {
+      id_businessId: {
+        id: transactionId,
+        businessId,
       },
-    });
-    if (existing) {
-      if (existing.businessId !== businessId) {
-        const error = new Error("Transaction belongs to another business");
-        error.statusCode = 403;
-        error.location = location;
-        throw error;
-      }
-      return {
-        status: "duplicate",
-        code: "DUPLICATE_ID",
-        transaction: existing,
-        syncTimestamp: existing.syncedAt || existing.createdAt,
-      };
-    }
+    },
+    include: {
+      items: {
+        include: { product: { select: { id: true, name: true, barcode: true } } },
+      },
+    },
+  });
+  if (existingForBusiness) {
+    return {
+      status: "duplicate",
+      code: "DUPLICATE_ID",
+      transaction: existingForBusiness,
+      syncTimestamp: existingForBusiness.syncedAt || existingForBusiness.createdAt,
+    };
+  }
+
+  const existingOtherBusiness = await tx.transaction.findUnique({
+    where: { id: transactionId },
+    select: { id: true, businessId: true },
+  });
+  if (existingOtherBusiness) {
+    const error = new Error("Transaction belongs to another business");
+    error.statusCode = 403;
+    error.location = location;
+    throw error;
   }
 
   const productIds = items.map((item) => item.product_id);
@@ -113,9 +121,11 @@ async function processSingleTransaction(tx, businessId, userId, payload) {
 
   for (const item of items) {
     const product = productsById.get(item.product_id);
-    if (product.stock < item.quantity) {
-      const error = new Error(`Insufficient stock for product ${product.name}`);
+    const newStock = product.stock - item.quantity;
+    if (newStock < 0) {
+      const error = new Error("INSUFFICIENT_STOCK");
       error.statusCode = 409;
+      error.code = "INSUFFICIENT_STOCK";
       error.location = location;
       throw error;
     }
@@ -227,8 +237,9 @@ async function createTransactionsBulk(businessId, userId, transactions) {
   const results = [];
   for (const payload of ordered) {
     try {
-      const result = await prisma.$transaction(async (tx) =>
-        processSingleTransaction(tx, businessId, userId, payload)
+      const result = await prisma.$transaction(
+        async (tx) => processSingleTransaction(tx, businessId, userId, payload),
+        { timeout: 15_000, maxWait: 10_000 }
       );
       results.push(result);
       if (result.status === "duplicate") {
@@ -247,7 +258,7 @@ async function createTransactionsBulk(businessId, userId, transactions) {
         });
       }
     } catch (error) {
-      if (error.statusCode === 409) {
+      if (error.statusCode === 409 && error.code === "INSUFFICIENT_STOCK") {
         await logAudit({
           businessId,
           userId,
@@ -259,8 +270,8 @@ async function createTransactionsBulk(businessId, userId, transactions) {
         });
       }
       const code =
-        error.statusCode === 409
-          ? "INVENTORY_CONFLICT"
+        error.code === "INSUFFICIENT_STOCK"
+          ? "INSUFFICIENT_STOCK"
           : error.statusCode === 400
             ? "VALIDATION_FAILED"
             : "TRANSIENT_SYNC_FAILURE";

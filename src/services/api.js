@@ -1,8 +1,14 @@
 import axios from "axios";
+import { API_BASE_URL } from "../config/apiBaseUrl";
+import { clearSessionCookie, refreshAccessTokenSilently } from "./authRefresh";
 import { useAuthStore } from "../stores/authStore";
+import { useConflictStore } from "../stores/conflictStore";
+import { useToastStore } from "../stores/toastStore";
+import { getStoredAuthTokenSync } from "../utils/authToken";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:4000",
+  baseURL: API_BASE_URL,
+  withCredentials: true,
 });
 
 function unwrap(data) {
@@ -11,23 +17,146 @@ function unwrap(data) {
     : data;
 }
 
+/** In-memory token first (fresh login), then `auth_token` / persisted Zustand. */
+function resolveAuthToken() {
+  const fromStore = useAuthStore.getState().token;
+  if (fromStore) return fromStore;
+  return getStoredAuthTokenSync();
+}
+
+/** Login/register failures: do not logout or retry. */
+function isAuthRouteRequest(config) {
+  const url = String(config?.url || "");
+  return /\/auth\//.test(url);
+}
+
+function isRefreshRequest(config) {
+  const url = String(config?.url || "");
+  return url.includes("/auth/refresh");
+}
+
+function handleSessionExpired() {
+  void clearSessionCookie();
+  const { logout } = useAuthStore.getState();
+  logout();
+  if (typeof window !== "undefined") {
+    const path = window.location.pathname;
+    if (path !== "/login" && path !== "/register") {
+      useToastStore.getState().showToast("Your session has expired. Please sign in again.", "error");
+      window.setTimeout(() => window.location.assign("/login"), 50);
+    }
+  }
+}
+
 api.interceptors.request.use((config) => {
-  const { token } = useAuthStore.getState();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const token = resolveAuthToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+/** Stash last PUT JSON body so CONFLICT responses can retry with `force` (see ConflictResolutionHost). */
+api.interceptors.request.use((config) => {
+  const method = String(config.method || "").toLowerCase();
+  if (method === "put" && config.data != null) {
+    try {
+      const body = typeof config.data === "string" ? JSON.parse(config.data) : config.data;
+      config.__putBody = body && typeof body === "object" ? { ...body } : body;
+    } catch {
+      config.__putBody = null;
+    }
+  }
   return config;
 });
 
 api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    const status = error.response?.status;
-    if (status === 401) {
-      const { logout } = useAuthStore.getState();
-      logout();
-      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-        window.location.assign("/login");
-      }
+  (response) => {
+    const rid = response.data?.requestId;
+    if (rid != null) {
+      response.requestId = rid;
     }
+    return response;
+  },
+  async (error) => {
+    const rid = error.response?.data?.requestId;
+    if (rid != null) {
+      error.requestId = rid;
+    }
+    if (!error.response) {
+      error.isNetworkError = true;
+      return Promise.reject(error);
+    }
+
+    const apiCode = error.response?.data?.code;
+    if (apiCode === "CONFLICT") {
+      const row = error.response.data?.data || {};
+      const url = String(error.config?.url || "");
+      const kind = url.includes("/customers/") ? "customer" : url.includes("/products/") ? "product" : null;
+      const originalPayload = error.config?.__putBody;
+      useConflictStore.getState().openConflict({
+        ...row,
+        originalPayload,
+        kind,
+      });
+      useToastStore.getState().showToast(
+        "This item was updated elsewhere. Please resolve the conflict.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+
+    const status = error.response?.status;
+    const config = error.config;
+    if (status === 429 || apiCode === "QUOTA_EXCEEDED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "Usage limit reached. Upgrade for more capacity.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+    if (status === 403 && apiCode === "FEATURE_DISABLED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "This feature is not enabled for your plan.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+    if (status === 402 || apiCode === "PAYMENT_REQUIRED") {
+      useToastStore.getState().showToast(
+        error.response?.data?.message || "Choose a plan to continue using this feature.",
+        "error"
+      );
+      return Promise.reject(error);
+    }
+    if (status !== 401 || !config) {
+      return Promise.reject(error);
+    }
+
+    if (isRefreshRequest(config)) {
+      handleSessionExpired();
+      return Promise.reject(error);
+    }
+
+    if (isAuthRouteRequest(config)) {
+      return Promise.reject(error);
+    }
+
+    if (config._retryAfterRefresh) {
+      handleSessionExpired();
+      return Promise.reject(error);
+    }
+
+    const newToken = await refreshAccessTokenSilently();
+    if (newToken) {
+      config._retryAfterRefresh = true;
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${newToken}`;
+      return api.request(config);
+    }
+
+    handleSessionExpired();
     return Promise.reject(error);
   }
 );
@@ -58,7 +187,7 @@ export async function putProduct(id, body) {
 }
 
 export async function postTransaction(payload) {
-  const { data } = await api.post("/transactions", payload);
+  const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
   return unwrap(data);
 }
 
@@ -95,6 +224,108 @@ export async function getAdminDailyCloseStatus() {
 }
 export async function postAdminDailyClose() {
   const { data } = await api.post("/admin/daily-close");
+  return unwrap(data);
+}
+
+export async function getAdminBillingOverview() {
+  const { data } = await api.get("/admin/billing-overview");
+  return unwrap(data);
+}
+
+export async function getAdminBillingWebhookEvents(params) {
+  const { data } = await api.get("/admin/billing-webhook-events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminPaymentsQuery(params) {
+  const { data } = await api.get("/admin/payments-query", { params });
+  return unwrap(data);
+}
+
+export async function postAdminPaymentRetriesRun() {
+  const { data } = await api.post("/admin/payment-retries/run");
+  return unwrap(data);
+}
+
+export async function getAdminPaymentsReconcile() {
+  const { data } = await api.get("/admin/payments/reconcile");
+  return unwrap(data);
+}
+
+export async function postAdminPaymentsReconcileApply() {
+  const { data } = await api.post("/admin/payments/reconcile/apply");
+  return unwrap(data);
+}
+
+/** Phase 7.2: `/api/admin/*` monitoring (JWT + admin; read-only except optional alert test). */
+export async function getAdminSyncSummary() {
+  const { data } = await api.get("/api/admin/sync-summary");
+  return unwrap(data);
+}
+
+export async function getAdminTransactions(params) {
+  const { data } = await api.get("/api/admin/transactions", { params });
+  return unwrap(data);
+}
+
+export async function getAdminTransaction(id) {
+  const { data } = await api.get(`/api/admin/transactions/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function getAdminEvents(params) {
+  const { data } = await api.get("/api/admin/events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminEvent(id) {
+  const { data } = await api.get(`/api/admin/events/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function getAdminPayments(params) {
+  const { data } = await api.get("/api/admin/payments", { params });
+  return unwrap(data);
+}
+
+export async function getAdminWebhookEvents(params) {
+  const { data } = await api.get("/api/admin/webhook-events", { params });
+  return unwrap(data);
+}
+
+export async function getAdminOperationalErrors(params) {
+  const { data } = await api.get("/api/admin/errors", { params });
+  return unwrap(data);
+}
+
+export async function getAdminMonitoringAlerts() {
+  const { data } = await api.get("/api/admin/monitoring-alerts");
+  return unwrap(data);
+}
+
+export async function postAdminAlertTest(payload) {
+  const { data } = await api.post("/api/admin/alerts/test", payload ?? {});
+  return unwrap(data);
+}
+
+/** Phase 7.3: BI (BASIC+ plan, manager or admin). */
+export async function getBiSnapshot(params) {
+  const { data } = await api.get("/api/bi/snapshot", { params });
+  return unwrap(data);
+}
+
+export async function getBiTransactions(params) {
+  const { data } = await api.get("/api/bi/transactions", { params });
+  return unwrap(data);
+}
+
+export async function getBiTransaction(id) {
+  const { data } = await api.get(`/api/bi/transactions/${encodeURIComponent(id)}`);
+  return unwrap(data);
+}
+
+export async function postBiSlackSummary(payload) {
+  const { data } = await api.post("/api/bi/reports/slack-summary", payload ?? {});
   return unwrap(data);
 }
 
@@ -187,6 +418,50 @@ export async function confirmBillingPayment(payload) {
 export async function getPaymentHistory() {
   const { data } = await api.get("/billing/payment-history");
   return unwrap(data);
+}
+
+export async function postCancelSubscription() {
+  const { data } = await api.post("/billing/cancel");
+  return unwrap(data);
+}
+
+export async function getBillingLifecycleEvents() {
+  const { data } = await api.get("/billing/lifecycle-events");
+  return unwrap(data);
+}
+
+export async function getBillingLifecycleMetrics() {
+  const { data } = await api.get("/billing/lifecycle-metrics");
+  return unwrap(data);
+}
+
+/** Phase 7.5: usage quotas, loyalty snapshot, upsell hints. */
+export async function getUsageSummary() {
+  const { data } = await api.get("/usage/summary");
+  return unwrap(data);
+}
+
+/** Phase 7.5: resolved feature flags for current plan + A/B bucket. */
+export async function getUsageFeatures() {
+  const { data } = await api.get("/usage/features");
+  return unwrap(data);
+}
+
+/** Phase 8: newsletter / lead capture (CRM hooks in ops). */
+export async function postMarketingLead(payload) {
+  const { data } = await api.post("/marketing/leads", payload);
+  return unwrap(data);
+}
+
+export async function downloadBillingPaymentsCsv() {
+  const response = await api.get("/billing/export/payments.csv", { responseType: "blob" });
+  const blob = response.data;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "payments.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function getAuditLogs() {

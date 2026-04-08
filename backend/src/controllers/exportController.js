@@ -24,6 +24,7 @@ async function getExport(req, res, next) {
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${type}.csv"`);
+    // CSV responses are intentionally raw (not JSON); use sendOk/sendError for JSON APIs only.
     return res.status(200).send(csv);
   } catch (error) {
     return next(error);

@@ -4,14 +4,24 @@ import { useAuthStore } from "../../stores/authStore";
 import { useOfflineStore } from "../../stores/offlineStore";
 import ThemeToggle from "../ThemeToggle";
 import SystemHealthBadge from "../SystemHealthBadge";
+import SyncStatusIndicator from "../SyncStatusIndicator";
 import { can } from "../../utils/permissions";
 import { logoutAllDevices } from "../../services/api";
+import { clearSessionCookie } from "../../services/authRefresh";
 import { useToastStore } from "../../stores/toastStore";
 import { CORE_POSITIONING, VALIDATION_MODE } from "../../config/productMode";
+import ConflictResolutionHost from "../ConflictResolutionHost";
+import SyncDebugPanel from "../SyncDebugPanel";
+import QuotaBanner from "../QuotaBanner";
 
 export default function AppShell() {
   const location = useLocation();
-  const logout = useAuthStore((s) => s.logout);
+  const clearAuth = useAuthStore((s) => s.logout);
+
+  const performLogout = async () => {
+    await clearSessionCookie();
+    clearAuth();
+  };
   const role = useAuthStore((s) => s.user?.role);
   const plan = useAuthStore((s) => s.user?.subscription_plan || "FREE");
   const isOnline = useOfflineStore((s) => s.isOnline);
@@ -32,12 +42,16 @@ export default function AppShell() {
   ];
   const secondaryLinks = [
     { to: "/customers", label: "Customers" },
+    { to: "/usage", label: "Usage" },
     { to: "/onboarding", label: "Onboarding" },
     ...(can(role, "accessSettings") ? [{ to: "/settings", label: "Settings" }] : []),
     ...(role === "ADMIN" ? [{ to: "/staff", label: "Staff" }] : []),
     ...(!VALIDATION_MODE && can(role, "viewReports") && plan !== "FREE" ? [{ to: "/reports", label: "Reports" }] : []),
+    ...(!VALIDATION_MODE && can(role, "viewReports") && plan !== "FREE" ? [{ to: "/bi", label: "BI" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/billing", label: "Billing" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/audit-logs", label: "Audit Logs" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/monitoring", label: "Monitoring" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/growth", label: "Growth KPIs" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/backups", label: "Backups" }] : []),
     { to: "/help", label: "Help" },
   ];
@@ -51,7 +65,7 @@ export default function AppShell() {
   );
   const systemLinks = secondaryLinks.filter((l) => ["/help"].includes(l.to));
   const adminLinks = secondaryLinks.filter((l) =>
-    ["/reports", "/billing", "/audit-logs", "/backups"].includes(l.to)
+    ["/reports", "/bi", "/billing", "/audit-logs", "/backups", "/admin/monitoring", "/admin/growth"].includes(l.to)
   );
 
   useEffect(() => {
@@ -82,6 +96,7 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-stone-50 pb-20 text-stone-900 dark:bg-stone-950 dark:text-stone-100 md:pb-0">
+      <QuotaBanner />
       <header className="border-b border-stone-200 bg-white/90 backdrop-blur dark:border-stone-800 dark:bg-stone-900/90">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <Link to="/dashboard" className="text-lg font-bold text-teal-800 dark:text-teal-400">
@@ -175,8 +190,9 @@ export default function AppShell() {
               )}
             </div>
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <SystemHealthBadge />
+            <SyncStatusIndicator />
             <div className="rounded-lg border border-stone-300 bg-stone-100 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300">
               Plan: {plan} · {isOnline ? "Online" : "Offline"}
               {syncing ? " · Syncing" : ""}
@@ -191,7 +207,7 @@ export default function AppShell() {
             <ThemeToggle />
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void performLogout()}
               className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-800 shadow-sm hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
             >
               Logout
@@ -201,7 +217,7 @@ export default function AppShell() {
               onClick={async () => {
                 try {
                   await logoutAllDevices();
-                  logout();
+                  clearAuth();
                   showToast("Logged out from all devices.", "success");
                 } catch {
                   showToast("Could not logout all devices.", "error");
@@ -219,6 +235,8 @@ export default function AppShell() {
           {CORE_POSITIONING}
         </div>
         <Outlet />
+        <ConflictResolutionHost />
+        {import.meta.env.DEV && <SyncDebugPanel />}
       </main>
       {mobileMoreOpen && (
         <div

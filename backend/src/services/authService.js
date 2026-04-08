@@ -4,10 +4,17 @@ const { signAuthToken } = require("../utils/jwt");
 const { ensureBusinessSubscription } = require("./subscriptionService");
 const { ensureOnboarding } = require("./onboardingService");
 const { createSession } = require("./sessionService");
+const { issueRefreshToken } = require("./refreshTokenService");
 const { logAudit } = require("./auditService");
+const { sanitizeDisplayName, normalizeEmail } = require("../utils/sanitize");
+const { logger } = require("../utils/logger");
 
 async function registerOwner({ businessName, name, email, password, userAgent, ipAddress }) {
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const safeBusinessName = sanitizeDisplayName(businessName, 120);
+  const safeName = sanitizeDisplayName(name, 120);
+  const safeEmail = normalizeEmail(email);
+
+  const existing = await prisma.user.findUnique({ where: { email: safeEmail } });
   if (existing) {
     const error = new Error("Email already in use");
     error.statusCode = 409;
@@ -18,11 +25,11 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
 
   const result = await prisma.business.create({
     data: {
-      name: businessName,
+      name: safeBusinessName,
       users: {
         create: {
-          name,
-          email,
+          name: safeName,
+          email: safeEmail,
           password: hashed,
           role: "ADMIN",
         },
@@ -41,6 +48,7 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
     role: user.role,
     jti,
   });
+  const refreshToken = await issueRefreshToken(user.id, jti);
   await logAudit({
     businessId: result.id,
     userId: user.id,
@@ -50,6 +58,7 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       name: user.name,
@@ -65,9 +74,19 @@ async function registerOwner({ businessName, name, email, password, userAgent, i
   };
 }
 
-async function login({ email, password, userAgent, ipAddress }) {
-  const user = await prisma.user.findUnique({ where: { email } });
+async function login({ email, password, userAgent, ipAddress, requestId }) {
+  const safeEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({ where: { email: safeEmail } });
   if (!user) {
+    logger.warn(
+      {
+        event: "AUTH_LOGIN_FAILED",
+        reason: "UNKNOWN_EMAIL",
+        requestId: requestId || null,
+        ip: ipAddress || null,
+      },
+      "login failed: unknown email"
+    );
     const error = new Error("Invalid email or password");
     error.statusCode = 401;
     throw error;
@@ -75,6 +94,15 @@ async function login({ email, password, userAgent, ipAddress }) {
 
   const valid = await comparePassword(password, user.password);
   if (!valid) {
+    await logAudit({
+      businessId: user.businessId,
+      userId: user.id,
+      action: "AUTH_LOGIN_FAILED_INVALID_PASSWORD",
+      metadata: {
+        requestId: requestId || null,
+        ip: ipAddress || null,
+      },
+    });
     const error = new Error("Invalid email or password");
     error.statusCode = 401;
     throw error;
@@ -89,15 +117,17 @@ async function login({ email, password, userAgent, ipAddress }) {
     role: user.role,
     jti,
   });
+  const refreshToken = await issueRefreshToken(user.id, jti);
   await logAudit({
     businessId: user.businessId,
     userId: user.id,
     action: "AUTH_LOGIN",
-    metadata: { email: user.email },
+    metadata: { email: user.email, requestId: requestId || null },
   });
 
   return {
     token,
+    refreshToken,
     user: {
       id: user.id,
       name: user.name,

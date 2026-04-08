@@ -2,8 +2,12 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { postProduct, putProduct } from "../services/api";
+import { enqueueOutbox, upsertProductInCache } from "../services/db";
 import { useProducts } from "../hooks/useProducts";
+import { useOfflineSync } from "../hooks/useOfflineSync";
+import { useOfflineStore } from "../stores/offlineStore";
 import { useToastStore } from "../stores/toastStore";
+import { useConflictStore } from "../stores/conflictStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatMoney } from "../utils/currency";
 
@@ -22,10 +26,15 @@ const field =
 export default function InventoryPage() {
   const queryClient = useQueryClient();
   const showToast = useToastStore((s) => s.showToast);
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const { refreshCount } = useOfflineSync();
   const { data: products = [], isLoading, isError } = useProducts();
   const settings = useSettingsStore((s) => s.settings);
+  const pendingConflictIds = useConflictStore((s) => s.pendingConflictIds);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  /** ISO string from server when edit started; required for optimistic concurrency on PUT. */
+  const [editBaselineUpdatedAt, setEditBaselineUpdatedAt] = useState(null);
 
   const createMutation = useMutation({
     mutationFn: (body) => postProduct(body),
@@ -44,16 +53,24 @@ export default function InventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setEditingId(null);
+      setEditBaselineUpdatedAt(null);
       setForm(emptyForm);
       showToast("Product updated.", "success");
     },
     onError: (err) => {
+      if (err.response?.data?.code === "CONFLICT") {
+        void queryClient.invalidateQueries({ queryKey: ["products"] });
+        return;
+      }
       showToast(err.response?.data?.message || "Could not update product.", "error");
     },
   });
 
   const startEdit = (p) => {
     setEditingId(p.id);
+    setEditBaselineUpdatedAt(
+      p.updatedAt ? String(p.updatedAt) : p.createdAt ? String(p.createdAt) : new Date().toISOString()
+    );
     setForm({
       name: p.name,
       sellingPrice: String(p.sellingPrice ?? p.price),
@@ -64,7 +81,7 @@ export default function InventoryPage() {
     });
   };
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
     const body = {
       name: form.name.trim(),
@@ -77,10 +94,55 @@ export default function InventoryPage() {
     if (form.barcode.trim()) body.barcode = form.barcode.trim();
 
     if (editingId) {
-      updateMutation.mutate({ id: editingId, body });
-    } else {
-      createMutation.mutate(body);
+      const baseline =
+        editBaselineUpdatedAt ||
+        products.find((x) => x.id === editingId)?.updatedAt ||
+        products.find((x) => x.id === editingId)?.createdAt;
+      body.lastKnownUpdatedAt = baseline ? String(baseline) : new Date().toISOString();
     }
+
+    if (isOnline) {
+      if (editingId) {
+        updateMutation.mutate({ id: editingId, body });
+      } else {
+        createMutation.mutate(body);
+      }
+      return;
+    }
+
+    if (editingId) {
+      await enqueueOutbox({
+        kind: "PUT_PRODUCT",
+        body,
+        meta: { productId: editingId },
+      });
+      const prev = products.find((p) => p.id === editingId) || {};
+      await upsertProductInCache({
+        ...prev,
+        ...body,
+        id: editingId,
+      });
+    } else {
+      const id = crypto.randomUUID();
+      const fullBody = { ...body, id };
+      await enqueueOutbox({ kind: "POST_PRODUCT", body: fullBody });
+      await upsertProductInCache({
+        id,
+        name: fullBody.name,
+        price: fullBody.price,
+        sellingPrice: fullBody.sellingPrice,
+        costPrice: fullBody.costPrice,
+        stock: fullBody.stock,
+        lowStockThreshold: fullBody.lowStockThreshold,
+        barcode: fullBody.barcode || null,
+      });
+    }
+    await refreshCount();
+    await queryClient.invalidateQueries({ queryKey: ["products"] });
+    showToast("Saved offline. Will sync when you are back online.", "success");
+    setForm(emptyForm);
+    setEditingId(null);
+    setEditBaselineUpdatedAt(null);
   };
 
   const busy = createMutation.isPending || updateMutation.isPending;
@@ -91,6 +153,11 @@ export default function InventoryPage() {
       <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">
         Add products before using POS. Stock updates automatically when sales are completed.
       </p>
+      {!isOnline && (
+        <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          You are offline. Product changes are saved on this device and will sync when you are back online.
+        </p>
+      )}
 
       <form
         onSubmit={onSubmit}
@@ -168,6 +235,7 @@ export default function InventoryPage() {
               className="rounded-lg border border-stone-300 px-4 py-2 text-stone-800 dark:border-stone-600 dark:text-stone-200"
               onClick={() => {
                 setEditingId(null);
+                setEditBaselineUpdatedAt(null);
                 setForm(emptyForm);
               }}
             >
@@ -220,7 +288,16 @@ export default function InventoryPage() {
             <tbody>
               {products.map((p) => (
                 <tr key={p.id} className="border-t border-stone-200 dark:border-stone-700">
-                  <td className="p-3 font-medium">{p.name}</td>
+                  <td className="p-3 font-medium">
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {p.name}
+                      {pendingConflictIds[p.id] === "product" && (
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:bg-red-950/50 dark:text-red-400">
+                          Conflict
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="p-3">{formatMoney(p.sellingPrice ?? p.price, settings.currencySymbol)}</td>
                   <td className="p-3">{formatMoney(p.costPrice ?? 0, settings.currencySymbol)}</td>
                   <td

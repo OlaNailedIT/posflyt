@@ -2,13 +2,22 @@ const { z } = require("zod");
 const { listCustomers, createCustomer, updateCustomer } = require("../services/customerService");
 const { sendOk, sendError } = require("../utils/http");
 
-const customerCreateSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-  phone: z.string().trim().min(3).max(30),
-  email: z.string().trim().email().max(160).optional().or(z.literal("")),
-});
+const customerCreateSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    name: z.string().trim().min(2).max(120),
+    phone: z.string().trim().min(3).max(30),
+    email: z.string().trim().email().max(160).optional().or(z.literal("")),
+  })
+  .strict();
 
-const customerUpdateSchema = customerCreateSchema.partial();
+const customerUpdateSchema = customerCreateSchema.partial().extend({
+  lastKnownUpdatedAt: z
+    .string()
+    .min(1, "lastKnownUpdatedAt is required")
+    .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Invalid lastKnownUpdatedAt" }),
+  force: z.boolean().optional(),
+}).strict();
 
 async function getCustomers(req, res, next) {
   try {
@@ -22,7 +31,7 @@ async function getCustomers(req, res, next) {
 async function postCustomer(req, res, next) {
   try {
     const payload = customerCreateSchema.parse(req.body);
-    const data = await createCustomer(req.auth.businessId, payload);
+    const data = await createCustomer(req.auth.businessId, payload, req.auth.userId);
     return sendOk(res, data, 201);
   } catch (error) {
     if (error.name === "ZodError") {

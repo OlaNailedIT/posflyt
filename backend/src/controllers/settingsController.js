@@ -7,17 +7,32 @@ const {
 } = require("../services/settingsService");
 const { sendOk, sendError } = require("../utils/http");
 
-const updateSettingsSchema = z.object({
-  currencySymbol: z.string().trim().min(1).max(5),
-  taxEnabled: z.boolean(),
-  taxRate: z.coerce.number().min(0).max(100),
-  businessName: z.string().trim().min(2).max(120),
-  businessEmail: z.string().trim().email().max(160),
-  businessPhone: z.string().trim().max(30).optional().or(z.literal("")),
-}).strip();
-
-// Future enhancement — not part of MVP:
-// countryCode, currencyCode, taxRules, logoUrl, receiptLayout
+const updateSettingsSchema = z
+  .object({
+    currencySymbol: z.string().trim().min(1).max(5),
+    taxEnabled: z.boolean(),
+    taxRate: z.coerce.number().min(0).max(100),
+    businessName: z.string().trim().min(2).max(120),
+    businessEmail: z.string().trim().email().max(160),
+    businessPhone: z.string().trim().max(30).optional().or(z.literal("")),
+    // Forward-compatible keys accepted by API but still stripped by sanitizeSettingsPayload until persisted.
+    countryCode: z.string().trim().max(8).optional(),
+    currencyCode: z.string().trim().max(8).optional(),
+    taxRules: z
+      .array(
+        z
+          .object({
+            countryCode: z.string().optional(),
+            enabled: z.boolean().optional(),
+            rate: z.number().optional(),
+          })
+          .strict()
+      )
+      .optional(),
+    logoUrl: z.union([z.string().url().max(2048), z.literal("")]).optional(),
+    receiptLayout: z.string().trim().max(64).optional(),
+  })
+  .strict();
 function logStructuredSettingsControllerError({ status = 500, message, location, error }) {
   // eslint-disable-next-line no-console
   console.error("[POSflyt][settings]", {

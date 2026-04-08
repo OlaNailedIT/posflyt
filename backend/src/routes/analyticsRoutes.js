@@ -2,6 +2,7 @@ const express = require("express");
 const { requireAuth } = require("../middlewares/auth");
 const { requireAdmin } = require("../middlewares/role");
 const { requirePlan } = require("../middlewares/subscription");
+const { requireFeature } = require("../middlewares/requireFeature");
 const {
   getProfit,
   getStaff,
@@ -14,9 +15,10 @@ const {
 
 const router = express.Router();
 
-const guard = [requireAuth, requireAdmin, requirePlan("BASIC")];
+const guard = [requireAuth, requireAdmin, requirePlan("BASIC"), requireFeature("ADVANCED_ANALYTICS")];
+const staffGuard = [requireAuth, requireAdmin, requirePlan("BASIC"), requireFeature("STAFF_ANALYTICS")];
 router.get("/analytics/profit", ...guard, getProfit);
-router.get("/analytics/staff-performance", ...guard, getStaff);
+router.get("/analytics/staff-performance", ...staffGuard, getStaff);
 router.get("/analytics/smart-alerts", ...guard, getAlerts);
 router.get("/analytics/insights", ...guard, getInsightsFeed);
 router.get("/analytics/forecast", ...guard, getForecastData);

@@ -5,8 +5,7 @@ const { getSettings, putSettings } = require("../controllers/settingsController"
 
 const router = express.Router();
 
-router.use(requireAuth);
-router.get("/settings", getSettings);
-router.put("/settings", requirePermission("accessSettings"), putSettings);
+router.get("/settings", requireAuth, getSettings);
+router.put("/settings", requireAuth, requirePermission("accessSettings"), putSettings);
 
 module.exports = router;

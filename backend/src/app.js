@@ -1,7 +1,7 @@
+const { nodeEnv, trustProxy } = require("./config/env");
 const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
 const pinoHttp = require("pino-http");
+const { setupGateway } = require("./gateway/setupGateway");
 
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
@@ -21,21 +21,42 @@ const sessionRoutes = require("./routes/sessionRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const systemRoutes = require("./routes/systemRoutes");
 const staffRoutes = require("./routes/staffRoutes");
-const { rateLimit } = require("./middlewares/rateLimit");
-const { requestContext } = require("./middlewares/requestContext");
+const adminApiRoutes = require("./routes/adminApiRoutes");
+const biRoutes = require("./routes/biRoutes");
+const usageRoutes = require("./routes/usageRoutes");
+const marketingRoutes = require("./routes/marketingRoutes");
+const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
+const { attachRequestId } = require("./middlewares/requestId");
+const { attachRequestLogger } = require("./middlewares/requestLogger");
+const timeoutMiddleware = require("./middlewares/timeout");
+const { validateJsonContentType } = require("./middlewares/validateJsonContentType");
 const { metricsTracker } = require("./middlewares/metricsTracker");
 const { errorHandler, notFound } = require("./middlewares/errorHandler");
-const { sendOk } = require("./utils/http");
 const { logger } = require("./utils/logger");
-const { corsOrigin } = require("./config/env");
+const { getPrometheusMetrics } = require("./controllers/metricsController");
 
 const app = express();
 
-const allowedOrigins = corsOrigin === "*" ? true : corsOrigin.split(",").map((value) => value.trim());
+if (trustProxy !== false) {
+  app.set("trust proxy", trustProxy);
+}
 
-app.use(cors({ origin: allowedOrigins }));
-app.use(helmet());
-app.use(requestContext);
+app.use(attachRequestId);
+app.use(attachRequestLogger);
+// Phase 7.1: Prometheus scrape (optional); not subject to API rate limits.
+app.get("/metrics", getPrometheusMetrics);
+app.use(apiLimiter);
+
+setupGateway(app);
+
+const { getHealth, getReady } = require("./controllers/healthController");
+
+// Public liveness probe: lightweight; DB check optional for strict orchestrators.
+app.get("/health", getHealth);
+
+// Readiness: DB required; Redis when REDIS_URL is set (queue/cache).
+app.get("/ready", getReady);
+
 app.use(
   pinoHttp({
     logger,
@@ -51,11 +72,50 @@ app.use(
     autoLogging: false,
   })
 );
-app.use(express.json());
-app.use(metricsTracker);
-app.use(rateLimit);
 
-app.get("/health", (_req, res) => sendOk(res, { service: "backend", status: "up" }));
+const { stripeApiWebhook, paystackApiWebhook } = require("./controllers/billingController");
+// Phase 7.1: dedicated API webhooks (Stripe + Paystack require raw body for signature verification).
+app.post("/api/payments/webhook/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
+app.post("/api/payments/webhook/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
+app.post("/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
+app.post("/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
+
+app.use(express.json({ limit: "1mb" }));
+app.use(timeoutMiddleware);
+app.use(validateJsonContentType);
+app.use((req, res, next) => {
+  req.log.info(
+    {
+      route: req.originalUrl,
+      method: req.method,
+    },
+    "REQUEST_START"
+  );
+  res.on("finish", () => {
+    req.log.info(
+      {
+        route: req.originalUrl,
+        method: req.method,
+        statusCode: res.statusCode,
+        userId: req.auth?.userId,
+        businessId: req.auth?.businessId,
+      },
+      "REQUEST_COMPLETE"
+    );
+  });
+  next();
+});
+app.use(metricsTracker);
+
+if (nodeEnv !== "production") {
+  const debugRoutes = require("./routes/debugRoutes");
+  const { requireAuth } = require("./middlewares/auth");
+  const { getSyncDiagnostics } = require("./controllers/debugController");
+  app.use("/debug", debugRoutes);
+  app.get("/debug/sync", requireAuth, getSyncDiagnostics);
+}
+
+app.use("/auth", authLimiter);
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
 app.use("/transactions", transactionRoutes);
@@ -74,6 +134,10 @@ app.use("/", backupRoutes);
 app.use("/", sessionRoutes);
 app.use("/", supportRoutes);
 app.use("/", staffRoutes);
+app.use("/api/admin", adminApiRoutes);
+app.use("/api/bi", biRoutes);
+app.use("/", usageRoutes);
+app.use("/", marketingRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

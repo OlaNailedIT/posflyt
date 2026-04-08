@@ -1,5 +1,5 @@
 const Sentry = require("@sentry/node");
-const { sentryDsn, nodeEnv, sentryRelease } = require("../config/env");
+const { sentryDsn, nodeEnv, sentryRelease, sentryTracesSampleRate } = require("../config/env");
 
 const sentryEnabled = Boolean(sentryDsn);
 
@@ -9,7 +9,7 @@ function initSentry() {
     dsn: sentryDsn,
     environment: nodeEnv,
     release: sentryRelease || undefined,
-    tracesSampleRate: 0,
+    tracesSampleRate: sentryTracesSampleRate,
   });
 }
 

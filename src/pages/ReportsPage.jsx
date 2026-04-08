@@ -4,11 +4,15 @@ import { formatMoney } from "../utils/currency";
 import { useSettingsStore } from "../stores/settingsStore";
 import { exportCsv } from "../services/api";
 import { useAuthStore } from "../stores/authStore";
+import { useOfflineStore } from "../stores/offlineStore";
+import { useToastStore } from "../stores/toastStore";
 
 export default function ReportsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const plan = useAuthStore((s) => s.user?.subscription_plan || "FREE");
+  const isOnline = useOfflineStore((s) => s.isOnline);
+  const showToast = useToastStore((s) => s.showToast);
   const settings = useSettingsStore((s) => s.settings);
   const { data, isLoading } = useSalesReport(
     {
@@ -19,6 +23,10 @@ export default function ReportsPage() {
   );
 
   const onExport = async (type) => {
+    if (!isOnline) {
+      showToast("Export requires an internet connection.", "error");
+      return;
+    }
     const blob = await exportCsv(type);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -42,6 +50,12 @@ export default function ReportsPage() {
   return (
     <section>
       <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Reports</h1>
+      {!isOnline && (
+        <p className="mt-3 rounded-lg border border-stone-300 bg-stone-100 p-3 text-sm text-stone-800 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200">
+          Network unavailable. Reports and CSV export require an internet connection. POS and inventory changes
+          can still be queued offline from their pages.
+        </p>
+      )}
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-900">
         <label className="text-sm">
           From

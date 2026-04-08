@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20 <21"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -11,21 +14,26 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.2",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vite-plugin-pwa": "^1.2.0"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
     "@sentry/react": "^10.47.0",
     "@tanstack/react-query": "^5.95.2",
     "axios": "^1.14.0",
     "idb": "^8.0.3",
+    "prisma": "^5.22.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-helmet-async": "^3.0.0",
     "react-router-dom": "^7.13.2",
+    "recharts": "^2.15.0",
     "zustand": "^5.0.12"
   }
 }

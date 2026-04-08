@@ -13,7 +13,7 @@ async function getStatus(req, res, next) {
 async function markActive(req, res, next) {
   try {
     await markBusinessActive(req.auth.businessId);
-    return sendOk(res, { ok: true });
+    return sendOk(res, { markedActive: true });
   } catch (error) {
     return next(error);
   }

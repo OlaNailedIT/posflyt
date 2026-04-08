@@ -23,6 +23,7 @@ model Business {
   stores         Store[]
   subscription   Subscription?
   transactions   Transaction[]
+  usageMonthly   UsageMonthly[]
   users          User[]
 }
 
@@ -155,6 +156,30 @@ model Settings {
   updatedAt      DateTime @updatedAt
   businessId     String   @unique
   business       Business @relation(fields: [businessId], references: [id])
+}
+
+/// DB-backed feature toggles (Phase 7.5); seeded in migration.
+model FeatureFlag {
+  id               String   @id @default(uuid())
+  key              String   @unique
+  label            String?
+  freeEnabled      Boolean  @default(false)
+  basicEnabled     Boolean  @default(false)
+  premiumEnabled   Boolean  @default(false)
+  abRolloutPercent Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model UsageMonthly {
+  id              String   @id @default(uuid())
+  businessId      String
+  yearMonth       String
+  apiRequestCount Int      @default(0)
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, yearMonth])
+  @@index([businessId])
 }
 
 model Subscription {

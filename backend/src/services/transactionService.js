@@ -59,7 +59,7 @@ async function processSingleTransaction(tx, businessId, userId, payload) {
 
   const existingForBusiness = await tx.transaction.findUnique({
     where: {
-      client_transaction_id_business_id: {
+      id_businessId: {
         id: transactionId,
         businessId,
       },

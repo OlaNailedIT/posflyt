@@ -100,6 +100,10 @@ module.exports = {
   redisUrl: process.env.REDIS_URL || "",
   /** Optional read replica for analytics-heavy queries (Prisma second client). */
   databaseReadUrl: process.env.DATABASE_READ_URL || "",
+  /** Public base URL for receipt share links (Phase 7.12.1). Defaults to local API origin. */
+  apiPublicUrl:
+    process.env.API_PUBLIC_URL ||
+    `http://localhost:${Number(process.env.PORT || 4000)}`,
   /** Enable BullMQ workers + queue producers (requires Redis). */
   queueEnabled: process.env.QUEUE_ENABLED === "true",
   /** Default TTL seconds for distributed cache entries. */

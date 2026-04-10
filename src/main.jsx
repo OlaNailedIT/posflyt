@@ -63,11 +63,27 @@ function AuthReadyRoot() {
     return unsub;
   }, []);
 
+  /** If persist never signals (storage edge cases), do not block the shell forever. */
+  useEffect(() => {
+    const id = setTimeout(() => setPersistReady((prev) => prev || true), 5000);
+    return () => clearTimeout(id);
+  }, []);
+
   useEffect(() => {
     if (!persistReady) return undefined;
     let cancelled = false;
+    const BOOTSTRAP_BUDGET_MS = 15000;
     (async () => {
-      await bootstrapAuthSession();
+      try {
+        await Promise.race([
+          bootstrapAuthSession(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("bootstrapAuthSession timeout")), BOOTSTRAP_BUDGET_MS)
+          ),
+        ]);
+      } catch {
+        // IndexedDB or refresh can stall in some browsers; still show the app shell.
+      }
       if (!cancelled) setSessionReady(true);
     })();
     return () => {

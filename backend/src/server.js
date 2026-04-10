@@ -7,6 +7,7 @@ const { startBackupScheduler } = require("./services/backupService");
 const { startInventoryIntegrityMonitor } = require("./services/inventoryIntegrityService");
 const { scheduleQueueJobsIfEnabled } = require("./jobs/scheduleOnBoot");
 const { processDuePaymentRetries } = require("./services/paymentRetryService");
+const { startLowStockAlertScheduler } = require("./services/lowStockAlertService");
 const { quitRedis, pingRedis, isRedisConfigured } = require("./config/redis");
 const { disconnectReadPrisma } = require("./config/prismaRead");
 const { logger } = require("./utils/logger");
@@ -55,6 +56,7 @@ async function main() {
 
   startBackupScheduler();
   startInventoryIntegrityMonitor();
+  startLowStockAlertScheduler();
 
   try {
     await scheduleQueueJobsIfEnabled();

@@ -1,12 +1,11 @@
 const {
   getInvestorMetrics,
   getSalesFeed,
-  getDailyCloseStatus,
-  confirmDailyClose,
   getBillingOverview,
   listWebhookEventsForBusiness,
   listPaymentsForAdmin,
 } = require("../services/adminService");
+const { getDailyCloseStatus, confirmDailyClose } = require("../services/dailyCloseService");
 const { processDuePaymentRetries } = require("../services/paymentRetryService");
 const { reconcilePaymentsForBusiness, applyReconciliationFixes } = require("../services/paymentReconciliationService");
 const { sendOk } = require("../utils/http");

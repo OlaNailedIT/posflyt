@@ -25,6 +25,9 @@ const adminApiRoutes = require("./routes/adminApiRoutes");
 const biRoutes = require("./routes/biRoutes");
 const usageRoutes = require("./routes/usageRoutes");
 const marketingRoutes = require("./routes/marketingRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
+const inventoryCountRoutes = require("./routes/inventoryCountRoutes");
+const { getPublicReceipt } = require("./controllers/receiptPublicController");
 const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
 const { attachRequestId } = require("./middlewares/requestId");
 const { attachRequestLogger } = require("./middlewares/requestLogger");
@@ -80,7 +83,19 @@ app.post("/api/payments/webhook/paystack", express.raw({ type: "application/json
 app.post("/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
 app.post("/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
 
-app.use(express.json({ limit: "1mb" }));
+/** Phase 7.12.1: public receipt PDF (no auth; token is unguessable). */
+app.get("/receipts/public/:token", getPublicReceipt);
+
+/** Larger JSON body for Phase 7.13.3 IndexedDB cloud backup uploads (admin-only route). */
+function jsonBodyParser(req, res, next) {
+  const url = req.originalUrl || req.url || "";
+  const large =
+    req.method === "POST" &&
+    (url === "/backups/indexeddb" || url.startsWith("/backups/indexeddb?"));
+  return express.json({ limit: large ? "32mb" : "1mb" })(req, res, next);
+}
+
+app.use(jsonBodyParser);
 app.use(timeoutMiddleware);
 app.use(validateJsonContentType);
 app.use((req, res, next) => {
@@ -110,14 +125,17 @@ app.use(metricsTracker);
 if (nodeEnv !== "production") {
   const debugRoutes = require("./routes/debugRoutes");
   const { requireAuth } = require("./middlewares/auth");
-  const { getSyncDiagnostics } = require("./controllers/debugController");
+  const { getSyncDiagnostics, getTransactionDebug, getExpensesDebug } = require("./controllers/debugController");
   app.use("/debug", debugRoutes);
   app.get("/debug/sync", requireAuth, getSyncDiagnostics);
+  app.get("/debug/transaction/:id", requireAuth, getTransactionDebug);
+  app.get("/debug/expenses", requireAuth, getExpensesDebug);
 }
 
 app.use("/auth", authLimiter);
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
+app.use("/inventory-count", inventoryCountRoutes);
 app.use("/transactions", transactionRoutes);
 app.use("/", dashboardRoutes);
 app.use("/", systemRoutes);
@@ -138,6 +156,7 @@ app.use("/api/admin", adminApiRoutes);
 app.use("/api/bi", biRoutes);
 app.use("/", usageRoutes);
 app.use("/", marketingRoutes);
+app.use("/", expenseRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

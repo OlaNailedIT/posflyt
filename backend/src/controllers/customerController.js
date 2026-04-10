@@ -1,5 +1,5 @@
 const { z } = require("zod");
-const { listCustomers, createCustomer, updateCustomer } = require("../services/customerService");
+const { listCustomers, createCustomer, updateCustomer, settleCustomerCredit } = require("../services/customerService");
 const { sendOk, sendError } = require("../utils/http");
 
 const customerCreateSchema = z
@@ -18,6 +18,13 @@ const customerUpdateSchema = customerCreateSchema.partial().extend({
     .refine((v) => !Number.isNaN(Date.parse(v)), { message: "Invalid lastKnownUpdatedAt" }),
   force: z.boolean().optional(),
 }).strict();
+
+const settleCreditSchema = z
+  .object({
+    amount: z.coerce.number().positive(),
+    request_id: z.string().uuid().optional(),
+  })
+  .strict();
 
 async function getCustomers(req, res, next) {
   try {
@@ -66,4 +73,29 @@ async function putCustomer(req, res, next) {
   }
 }
 
-module.exports = { getCustomers, postCustomer, putCustomer };
+async function postSettleCredit(req, res, next) {
+  try {
+    const payload = settleCreditSchema.parse(req.body);
+    const data = await settleCustomerCredit(
+      req.auth.businessId,
+      req.params.id,
+      payload.amount,
+      req.auth.userId,
+      payload.request_id || null
+    );
+    return sendOk(res, data);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return sendError(res, {
+        statusCode: 400,
+        code: "VALIDATION_FAILED",
+        message: "Validation failed",
+        location: "controllers/customerController.postSettleCredit",
+        details: { requestId: req.requestId, errors: error.issues },
+      });
+    }
+    return next(error);
+  }
+}
+
+module.exports = { getCustomers, postCustomer, putCustomer, postSettleCredit };

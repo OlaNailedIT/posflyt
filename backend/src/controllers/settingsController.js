@@ -15,6 +15,7 @@ const updateSettingsSchema = z
     businessName: z.string().trim().min(2).max(120),
     businessEmail: z.string().trim().email().max(160),
     businessPhone: z.string().trim().max(30).optional().or(z.literal("")),
+    businessTimeZone: z.string().trim().max(64).optional().or(z.literal("")),
     // Forward-compatible keys accepted by API but still stripped by sanitizeSettingsPayload until persisted.
     countryCode: z.string().trim().max(8).optional(),
     currencyCode: z.string().trim().max(8).optional(),
@@ -31,6 +32,7 @@ const updateSettingsSchema = z
       .optional(),
     logoUrl: z.union([z.string().url().max(2048), z.literal("")]).optional(),
     receiptLayout: z.string().trim().max(64).optional(),
+    quickSalesProductIds: z.array(z.string().uuid()).max(48).optional(),
   })
   .strict();
 function logStructuredSettingsControllerError({ status = 500, message, location, error }) {

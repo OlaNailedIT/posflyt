@@ -18,13 +18,56 @@ model Business {
   onboarding     OnboardingProgress?
   paymentHistory PaymentHistory[]
   products       Product[]
+  lowStockAlertDays LowStockAlertDay[]
   settings       Settings?
   smartAlerts    SmartAlert[]
   stores         Store[]
   subscription   Subscription?
   transactions   Transaction[]
+  expenses       Expense[]
   usageMonthly   UsageMonthly[]
   users          User[]
+  dailyCloses    DailyClose[]
+}
+
+/// Phase 7.13.1: operational daily close log (not full accounting).
+model DailyClose {
+  id             String   @id @default(uuid())
+  businessId     String
+  userId         String
+  totalSales     Float
+  startOfDay     DateTime
+  endOfDay       DateTime
+  closedAt       DateTime @default(now())
+  /// YYYY-MM-DD in business time zone (idempotency: one close per business day).
+  businessDayKey String
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([businessId, businessDayKey])
+  @@index([businessId])
+  @@index([userId])
+  @@index([closedAt(sort: Desc)])
+}
+
+/// Phase 7.10.2: simple business expenses (profit = sales − expenses; not stored as a column).
+model Expense {
+  id         String   @id @default(cuid())
+  businessId String
+  amount     Float
+  category   String
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  requestId  String?  @unique
+  eventId    String?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, eventId])
+  @@index([businessId])
+  @@index([createdAt])
 }
 
 model User {
@@ -40,6 +83,7 @@ model User {
   issues        IssueReport[]
   refreshTokens RefreshToken[]
   transactions  Transaction[]
+  dailyCloses   DailyClose[]
   business      Business        @relation(fields: [businessId], references: [id])
 
   @@index([businessId])
@@ -77,8 +121,13 @@ model Product {
   costPrice         Float             @default(0)
   sellingPrice      Float             @default(0)
   price             Float
-  stock             Int
-  lowStockThreshold Int               @default(10)
+  /// Phase 7.11.1: "unit" = discrete count; "kg" | "litre" = sold by weight/volume (fractional qty).
+  unitType          String            @default("unit")
+  /// Price per kg/litre when unitType is not "unit"; null for discrete products.
+  pricePerUnit      Float?
+  stock             Float
+  /// Phase 7.11.3: alert when stock <= threshold; null or ≤0 = no alert for this product.
+  lowStockThreshold Float?
   barcode           String?           @unique
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -87,31 +136,72 @@ model Product {
   business          Business          @relation(fields: [businessId], references: [id])
   store             Store?            @relation(fields: [storeId], references: [id])
   transactionItems  TransactionItem[]
+  lowStockAlertDays LowStockAlertDay[]
 
   @@index([businessId])
 }
 
+/// Phase 7.11.3: one dedupe row per product per UTC day when a low-stock alert fires (transaction or scan).
+model LowStockAlertDay {
+  id          String   @id @default(cuid())
+  businessId  String
+  productId   String
+  dayUtc      String
+  stock       Float
+  threshold   Float
+  source      String
+  createdAt   DateTime @default(now())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, productId, dayUtc])
+  @@index([businessId])
+}
+
 model Customer {
-  id           String        @id @default(uuid())
-  name         String
-  email        String?
-  phone        String?
-  createdAt    DateTime      @default(now())
-  businessId   String
-  updatedAt    DateTime      @default(now()) @updatedAt
-  business     Business      @relation(fields: [businessId], references: [id])
-  transactions Transaction[]
+  id               String        @id @default(uuid())
+  name             String
+  email            String?
+  phone            String?
+  createdAt        DateTime      @default(now())
+  businessId       String
+  updatedAt        DateTime      @default(now()) @updatedAt
+  /// Sum of unpaid balances from credit / partial sales (server-maintained).
+  totalOutstanding Float         @default(0)
+  /// Idempotency key for aggregate settle (POST /customers/:id/settle-credit).
+  lastCreditSettlementRequestId String?
+  business         Business      @relation(fields: [businessId], references: [id])
+  transactions     Transaction[]
 
   @@index([businessId])
 }
 
 model Transaction {
   id            String            @id
-  total         Float
+  /// Sale total (line items + tax); CHECK-aligned with amountPaid / balanceDue.
+  totalAmount   Float
+  /// Phase 7.10.4: split tender lines; sum of amounts equals totalAmount when set. Legacy rows null.
+  payments      Json?
   paymentMethod PaymentMethod
+  /// Sale payment lifecycle (distinct from billing PaymentHistory.status enum).
+  paymentStatus TransactionPaymentStatus @default(PAID)
+  amountPaid    Float             @default(0)
+  balanceDue    Float             @default(0)
+  dueDate       DateTime?
   createdAt     DateTime
+  updatedAt     DateTime          @updatedAt
   syncedAt      DateTime?
   syncStatus    SyncStatus        @default(PENDING)
+  /// Duplicate replay guard for credit settlement sync.
+  lastSettlementRequestId String?
+  /// Offline / sync event deduplication (optional client-provided id).
+  lastProcessedEventId    String?
+  /// Phase 7.12.1: receipt PDF id (filename base in storage).
+  receiptId          String? @unique
+  /// Shareable URL (API public route or hosted PDF).
+  receiptUrl         String?
+  /// Opaque token for unauthenticated GET /receipts/public/:token.
+  receiptPublicToken String? @unique
   businessId    String
   userId        String
   storeId       String?
@@ -123,12 +213,13 @@ model Transaction {
   items         TransactionItem[]
 
   @@unique([id, businessId], map: "Transaction_client_transaction_id_business_id_key")
+  @@index([businessId])
   @@index([businessId, createdAt(sort: Desc)])
 }
 
 model TransactionItem {
   id            String      @id @default(uuid())
-  quantity      Int
+  quantity      Float
   price         Float
   transactionId String
   productId     String
@@ -150,8 +241,12 @@ model Settings {
   businessName   String
   businessEmail  String
   businessPhone  String?
+  /// IANA time zone for “today” in daily summary / reporting (Phase 7.12.4), e.g. Africa/Lagos.
+  businessTimeZone String @default("UTC")
   logoUrl        String?
   receiptLayout  String?  @default("STANDARD")
+  /// Phase 7.11.2: product UUIDs to show first in Quick Sales (ordered).
+  quickSalesProductIds Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   businessId     String   @unique
@@ -295,13 +390,16 @@ model AuditLog {
 }
 
 model BackupRecord {
-  id         String   @id @default(uuid())
-  filePath   String
-  sizeBytes  Int
-  status     String
-  createdAt  DateTime @default(now())
-  businessId String
-  business   Business @relation(fields: [businessId], references: [id])
+  id              String   @id @default(uuid())
+  filePath        String
+  sizeBytes       Int
+  status          String
+  /// "SERVER" = Prisma JSON export; "INDEXEDDB" = full offline store snapshot from client.
+  kind            String   @default("SERVER")
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id])
 
   @@index([businessId])
 }
@@ -337,6 +435,16 @@ enum PaymentMethod {
   CARD
   TRANSFER
   MOBILE
+  CREDIT
+  /// Multiple tender lines (see `payments` JSON).
+  MULTI
+}
+
+/// POS sale credit state (do not confuse with billing PaymentHistory payment lifecycle).
+enum TransactionPaymentStatus {
+  PAID
+  PARTIAL
+  CREDIT
 }
 
 enum SyncStatus {

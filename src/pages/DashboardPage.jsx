@@ -1,12 +1,13 @@
-import { Link } from "react-router-dom";
-import { useMemo } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useDashboardStats } from "../hooks/useDashboardStats";
+import { getOwnerDailySummary, getUsageFeatures } from "../services/api";
 import { useOfflineStore } from "../stores/offlineStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatMoney } from "../utils/currency";
 import { useAuthStore } from "../stores/authStore";
 import { useAdminSalesFeed } from "../hooks/useAdminSalesFeed";
-import { useEffect } from "react";
 import { useNotificationStore } from "../stores/notificationStore";
 import { useOnboardingStatus } from "../hooks/useOnboarding";
 import ExpandableSection from "../components/ui/ExpandableSection";
@@ -15,6 +16,13 @@ import { useSubscription } from "../hooks/useBilling";
 import SubscriptionBanner from "../components/SubscriptionBanner";
 import { useAdminDailyClose, useReliabilitySummary } from "../hooks/useSystem";
 import { useToastStore } from "../stores/toastStore";
+import { can } from "../utils/permissions";
+import {
+  buildOwnerDailySummaryWhatsAppChooseContact,
+  buildOwnerDailySummaryWhatsAppUrl,
+  formatOwnerDailySummaryMessage,
+} from "../utils/dailyOwnerSummaryWhatsApp";
+import { digitsForWhatsApp } from "../utils/whatsappReceipt";
 
 function getSyncRecovery(errorCode, errorMessage) {
   const code = errorCode || "";
@@ -51,7 +59,15 @@ function getConfidence(summary) {
 }
 
 export default function DashboardPage() {
+  const location = useLocation();
   const { data: stats, isLoading, isError, error } = useDashboardStats();
+  const { data: usageFeatures } = useQuery({
+    queryKey: ["usage", "features"],
+    queryFn: getUsageFeatures,
+    staleTime: 60_000,
+  });
+  const lowStockAlertsOn = usageFeatures?.flags?.LOW_STOCK_ALERTS !== false;
+  const dailySummaryOwnerOn = usageFeatures?.flags?.DAILY_SUMMARY_OWNER !== false;
   const { data: subscription } = useSubscription();
   const subscriptionBlocked =
     (subscription && subscription.subscriptionActive === false) ||
@@ -66,30 +82,57 @@ export default function DashboardPage() {
   const queueNextRetryAt = useOfflineStore((s) => s.queueNextRetryAt);
   const queueReplayOrder = useOfflineStore((s) => s.queueReplayOrder);
   const settings = useSettingsStore((s) => s.settings);
+  const ownerPhoneDigits = digitsForWhatsApp(settings.businessPhone);
+  const ownerPhoneOk = ownerPhoneDigits.length >= 8 && ownerPhoneDigits.length <= 15;
   const role = useAuthStore((s) => s.user?.role);
+  const canViewReports = can(role, "viewReports");
   const isAdmin = role === "ADMIN";
+  const canDailyClose = role === "ADMIN" || role === "MANAGER";
+  const [closeDayModalOpen, setCloseDayModalOpen] = useState(false);
   const { data: salesFeed = [] } = useAdminSalesFeed();
   const { data: reliability } = useReliabilitySummary(isAdmin);
-  const { data: dailyClose, confirmDailyClose } = useAdminDailyClose(isAdmin);
+  const { data: dailyClose, confirmDailyClose } = useAdminDailyClose(canDailyClose);
   const { syncQueue } = useOfflineSync();
   const showToast = useToastStore((s) => s.showToast);
+  const { data: ownerDailySummary, isLoading: ownerSummaryLoading } = useQuery({
+    queryKey: ["reports", "owner-daily-summary"],
+    queryFn: getOwnerDailySummary,
+    staleTime: 60_000,
+    enabled: Boolean(dailySummaryOwnerOn && canViewReports && !subscriptionBlocked),
+  });
   const { data: onboarding } = useOnboardingStatus();
   const upsertLowStockNotifications = useNotificationStore((s) => s.upsertLowStockNotifications);
   const notifications = useNotificationStore((s) => s.notifications);
 
   useEffect(() => {
-    upsertLowStockNotifications(stats?.lowStockProducts || []);
-  }, [stats?.lowStockProducts, upsertLowStockNotifications]);
+    upsertLowStockNotifications(stats?.lowStockProducts || [], lowStockAlertsOn);
+  }, [stats?.lowStockProducts, upsertLowStockNotifications, lowStockAlertsOn]);
+
+  useEffect(() => {
+    if (location.hash !== "#sync-trust") return;
+    const t = window.setTimeout(() => {
+      document.getElementById("sync-trust")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [location.hash, location.pathname]);
 
   const cards = useMemo(
     () => [
       ["Revenue (today)", formatMoney(stats?.revenue || 0, settings.currencySymbol)],
       ["Transactions (today)", stats?.transactions ?? 0],
-      ["Low stock products", stats?.lowStock ?? 0],
+      ...(lowStockAlertsOn ? [["Low stock products", stats?.lowStock ?? 0]] : []),
       ["Active customers", stats?.customers ?? 0],
       ["Returning customers", stats?.returningCustomers ?? 0],
     ],
-    [settings.currencySymbol, stats?.customers, stats?.lowStock, stats?.returningCustomers, stats?.revenue, stats?.transactions]
+    [
+      lowStockAlertsOn,
+      settings.currencySymbol,
+      stats?.customers,
+      stats?.lowStock,
+      stats?.returningCustomers,
+      stats?.revenue,
+      stats?.transactions,
+    ]
   );
   const salesBlockFreshness = pendingTransactions > 0 ? "includes local pending" : "synced-only";
   const stockBlockFreshness = pendingTransactions > 0 ? "includes local pending" : "synced-only";
@@ -126,6 +169,116 @@ export default function DashboardPage() {
           mode: {pendingTransactions > 0 ? "includes pending local sales" : "synced-only"}
         </p>
       </header>
+
+      {usageFeatures?.flags?.DAILY_PROFIT_SUMMARY && (
+        <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <h2 className="text-sm font-semibold text-stone-800 dark:text-stone-200">Daily profit summary</h2>
+          <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+            Today (UTC){stats?.date ? ` · ${stats.date}` : ""}
+          </p>
+          <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-stone-500 dark:text-stone-400">Sales</dt>
+              <dd className="font-semibold text-stone-900 dark:text-stone-100">
+                {formatMoney(stats?.revenue ?? 0, settings.currencySymbol)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-stone-500 dark:text-stone-400">Expenses</dt>
+              <dd className="font-semibold text-stone-900 dark:text-stone-100">
+                {formatMoney(stats?.totalExpenses ?? 0, settings.currencySymbol)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-stone-500 dark:text-stone-400">Daily profit</dt>
+              <dd
+                className={`font-semibold ${
+                  (stats?.dailyProfit ?? stats?.grossProfit ?? stats?.profit ?? 0) >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {formatMoney(stats?.dailyProfit ?? stats?.grossProfit ?? stats?.profit ?? 0, settings.currencySymbol)}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+            Sales minus expenses for the UTC day (derived). Excludes cost of goods — not net profit.{" "}
+            {usageFeatures?.flags?.EXPENSES ? (
+              <Link to="/expenses" className="text-teal-700 underline dark:text-teal-400">
+                Add expense
+              </Link>
+            ) : null}
+          </p>
+        </div>
+      )}
+
+      {dailySummaryOwnerOn && canViewReports && (
+        <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <h2 className="text-sm font-semibold text-stone-800 dark:text-stone-200">Daily summary to owner</h2>
+          <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+            Opens WhatsApp with a prefilled message (Phase 7.12.4). Uses your business time zone for “today”.
+          </p>
+          {ownerSummaryLoading ? (
+            <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">Loading today&apos;s figures…</p>
+          ) : ownerDailySummary ? (
+            <>
+              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+                Day {ownerDailySummary.dateKey} · {ownerDailySummary.calendar?.timeZone ?? "UTC"}
+                {ownerDailySummary.calendar?.timeZoneFallback
+                  ? " (time zone invalid — UTC bounds used)"
+                  : ""}
+              </p>
+              <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-stone-100 bg-stone-50 p-3 text-sm text-stone-800 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100">
+                {formatOwnerDailySummaryMessage(ownerDailySummary, settings.currencySymbol)}
+              </pre>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!ownerPhoneOk}
+                  onClick={() => {
+                    const msg = formatOwnerDailySummaryMessage(ownerDailySummary, settings.currencySymbol);
+                    const url = buildOwnerDailySummaryWhatsAppUrl(ownerPhoneDigits, msg);
+                    if (!url) {
+                      showToast("Add your business phone in Settings with country code (8–15 digits).", "error");
+                      return;
+                    }
+                    window.open(url, "_blank", "noopener,noreferrer");
+                    showToast("WhatsApp opened — tap Send to share your daily summary.", "success");
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ backgroundColor: "#25D366" }}
+                >
+                  Send via WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const msg = formatOwnerDailySummaryMessage(ownerDailySummary, settings.currencySymbol);
+                    window.open(buildOwnerDailySummaryWhatsAppChooseContact(msg), "_blank", "noopener,noreferrer");
+                    showToast("WhatsApp opened — choose a contact, then tap Send.", "success");
+                  }}
+                  className="rounded-lg border border-emerald-700 bg-white px-3 py-2 text-sm font-semibold text-emerald-900 dark:border-emerald-500 dark:bg-emerald-950 dark:text-emerald-100"
+                >
+                  Pick contact in WhatsApp
+                </button>
+                <Link
+                  to="/settings"
+                  className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600"
+                >
+                  Business phone and time zone
+                </Link>
+              </div>
+              <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+                If WhatsApp does not open, copy the text above into any chat. Configure phone and IANA time zone in
+                Settings.
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">Could not load today&apos;s summary.</p>
+          )}
+        </div>
+      )}
 
       {subscription && <SubscriptionBanner subscription={subscription} />}
 
@@ -177,7 +330,9 @@ export default function DashboardPage() {
           {onboarding.reminders[0]}
         </div>
       )}
-      {(pendingTransactions > 0 || failedTransactions > 0 || Number(stats?.lowStock || 0) > 0) && (
+      {(pendingTransactions > 0 ||
+        failedTransactions > 0 ||
+        (lowStockAlertsOn && Number(stats?.lowStock || 0) > 0)) && (
         <div className="grid gap-2 rounded-lg border border-stone-200 bg-white p-3 text-sm dark:border-stone-700 dark:bg-stone-900">
           {!stats?.transactions && (
             <div className="rounded border border-teal-300 bg-teal-50 px-2 py-1.5 text-teal-900 dark:border-teal-700 dark:bg-teal-900/20 dark:text-teal-300">
@@ -195,7 +350,7 @@ export default function DashboardPage() {
               </Link>
             </div>
           )}
-          {Number(stats?.lowStock || 0) > 0 && (
+          {lowStockAlertsOn && Number(stats?.lowStock || 0) > 0 && (
             <div className="rounded border border-red-300 bg-red-50 px-2 py-1.5 text-red-900 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300">
               Critical low stock detected.
               <Link to="/inventory" className="ml-2 underline">
@@ -249,7 +404,7 @@ export default function DashboardPage() {
           <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Today&apos;s metrics</h2>
           <p className="text-xs text-stone-500 dark:text-stone-400">Sales cards: {salesBlockFreshness}</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className={`grid gap-4 sm:grid-cols-2 ${lowStockAlertsOn ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
           {cards.map(([k, v]) => (
             <article
               key={k}
@@ -262,40 +417,72 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Low stock alerts</h2>
-        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Freshness: {stockBlockFreshness}</p>
-        <div className="mt-3 space-y-2">
-          {(stats?.lowStockProducts || []).length ? (
-            stats.lowStockProducts.map((product) => (
-              <div
-                key={product.id}
-                className={`rounded-lg border px-3 py-2 text-sm ${product.isCritical ? "border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300" : "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"}`}
-              >
-                {product.name}: {product.stock} left (threshold {product.lowStockThreshold})
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-stone-500 dark:text-stone-400">No low stock alerts.</p>
-          )}
-        </div>
-      </section>
+      {lowStockAlertsOn && (
+        <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Low stock alerts</h2>
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Freshness: {stockBlockFreshness}</p>
+            </div>
+            <Link
+              to="/inventory?filter=low_stock"
+              className="shrink-0 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white dark:bg-teal-500 dark:text-stone-950"
+            >
+              Open inventory (low stock)
+            </Link>
+          </div>
+          <div className="mt-3 space-y-2">
+            {(stats?.lowStockProducts || []).length ? (
+              stats.lowStockProducts.map((product) => (
+                <div
+                  key={product.id}
+                  className={`rounded-lg border px-3 py-2 text-sm ${product.isCritical ? "border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300" : "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300"}`}
+                >
+                  {product.name}: {product.stock} left (threshold {product.lowStockThreshold})
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-stone-500 dark:text-stone-400">No low stock alerts.</p>
+            )}
+          </div>
+        </section>
+      )}
 
-      <ExpandableSection title="Notifications" className="shadow-sm">
+      <ExpandableSection title="Smart alerts" className="shadow-sm">
+        <p className="mb-2 text-xs text-stone-500 dark:text-stone-400">
+          Phase 7.13.2: tap an action to jump to inventory or sync controls. Alerts also appear in the header bell.
+        </p>
         <div className="space-y-2">
           {notifications.length ? (
             notifications.map((note) => (
-              <div key={note.id} className="rounded border border-stone-200 px-3 py-2 text-sm dark:border-stone-700">
-                {note.message}
+              <div
+                key={note.id}
+                className="flex flex-wrap items-start justify-between gap-2 rounded border border-stone-200 px-3 py-2 text-sm dark:border-stone-700"
+              >
+                <span className="min-w-0 flex-1">{note.message}</span>
+                {note.actionRoute ? (
+                  <Link
+                    to={note.actionRoute}
+                    className="shrink-0 rounded bg-teal-600 px-2.5 py-1 text-xs font-semibold text-white dark:bg-teal-500 dark:text-stone-950"
+                  >
+                    {note.actionText || "Open"}
+                  </Link>
+                ) : null}
               </div>
             ))
           ) : (
-            <p className="text-sm text-stone-500 dark:text-stone-400">No notifications.</p>
+            <p className="text-sm text-stone-500 dark:text-stone-400">No active alerts.</p>
           )}
         </div>
       </ExpandableSection>
 
-      <ExpandableSection title="Trust Center (sync & reliability)" defaultOpen={false} className={`shadow-sm ${confidenceTone}`}>
+      <ExpandableSection
+        key={location.hash === "#sync-trust" ? "trust-open" : "trust"}
+        id="sync-trust"
+        title="Trust Center (sync & reliability)"
+        defaultOpen={location.hash === "#sync-trust"}
+        className={`shadow-sm ${confidenceTone}`}
+      >
         <div className="space-y-3 text-stone-900 dark:text-stone-100">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-sm font-medium">Confidence</span>
@@ -409,11 +596,13 @@ export default function DashboardPage() {
           </div>
         </section>
       )}
-      {isAdmin && (
+      {canDailyClose && (
         <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Daily close checklist</h2>
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Daily close</h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            Confirm today&apos;s totals and close the day with variance flags.
+            Phase 7.13.1: record an operational snapshot for today ({dailyClose?.calendar?.timeZone ?? "UTC"} day{" "}
+            {dailyClose?.businessDayKey ?? dailyClose?.date ?? "—"}). Totals are from the start of the business day
+            through now.
           </p>
           <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
             <div>Total revenue: {formatMoney(Number(dailyClose?.totalRevenue || 0), settings.currencySymbol)}</div>
@@ -430,28 +619,88 @@ export default function DashboardPage() {
               ))}
             </ul>
           )}
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
               disabled={dailyClose?.isClosed || confirmDailyClose.isPending}
-              onClick={async () => {
-                try {
-                  await confirmDailyClose.mutateAsync();
-                  showToast("Day closed successfully.", "success");
-                } catch {
-                  showToast("Could not close day.", "error");
-                }
-              }}
+              onClick={() => setCloseDayModalOpen(true)}
               className="rounded bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-teal-500 dark:text-stone-950"
             >
-              {dailyClose?.isClosed ? "Day closed" : "Confirm daily close"}
+              {dailyClose?.isClosed ? "Day closed" : "Close day"}
             </button>
-            <Link to="/staff" className="rounded border border-stone-300 px-3 py-1.5 text-xs dark:border-stone-600">
-              Review staff
-            </Link>
+            {isAdmin ? (
+              <Link to="/staff" className="rounded border border-stone-300 px-3 py-1.5 text-xs dark:border-stone-600">
+                Review staff
+              </Link>
+            ) : null}
           </div>
         </section>
       )}
+
+      {closeDayModalOpen && canDailyClose && !dailyClose?.isClosed ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="close-day-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCloseDayModalOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-xl dark:bg-stone-900">
+            <h3 id="close-day-title" className="text-lg font-semibold text-stone-900 dark:text-stone-100">
+              Close the day?
+            </h3>
+            <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
+              This records a daily close log for today with the totals below. You can only close once per business day.
+            </p>
+            <dl className="mt-3 space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3 text-sm dark:border-stone-600 dark:bg-stone-950">
+              <div className="flex justify-between gap-2">
+                <dt className="text-stone-500 dark:text-stone-400">Today&apos;s sales (so far)</dt>
+                <dd className="font-semibold text-stone-900 dark:text-stone-100">
+                  {formatMoney(Number(dailyClose?.totalRevenue || 0), settings.currencySymbol)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-stone-500 dark:text-stone-400">Transactions</dt>
+                <dd className="font-semibold text-stone-900 dark:text-stone-100">{dailyClose?.transactionCount ?? 0}</dd>
+              </div>
+            </dl>
+            {!!dailyClose?.varianceFlags?.length && (
+              <ul className="mt-2 space-y-1 text-xs text-amber-800 dark:text-amber-300">
+                {dailyClose.varianceFlags.map((flag) => (
+                  <li key={`m-${flag}`}>- {flag}</li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600"
+                onClick={() => setCloseDayModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={confirmDailyClose.isPending}
+                className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-teal-500 dark:text-stone-950"
+                onClick={async () => {
+                  try {
+                    await confirmDailyClose.mutateAsync();
+                    setCloseDayModalOpen(false);
+                    showToast("Day closed successfully.", "success");
+                  } catch {
+                    showToast("Could not close day.", "error");
+                  }
+                }}
+              >
+                {confirmDailyClose.isPending ? "Closing…" : "Confirm close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

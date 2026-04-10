@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { postProduct, postTransaction, postCustomer, putProduct } from "../services/api";
+import {
+  postProduct,
+  postTransaction,
+  postCustomer,
+  putProduct,
+  postSettleTransactionCredit,
+  postSettleCustomerCredit,
+  postExpense,
+  postInventoryCountFinalize,
+} from "../services/api";
 import {
   getQueuedOutbox,
   getQueuedTransactions,
@@ -20,6 +29,7 @@ import { useOfflineStore } from "../stores/offlineStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 import { useOnlineStatus } from "./useOnlineStatus";
 import { isRecoverableNetworkError } from "../utils/networkError";
+import { maybeAutoIndexedDBBackup } from "../services/indexeddbBackup";
 
 const BATCH_SIZE = 10;
 const CONCURRENCY = 3;
@@ -57,6 +67,18 @@ function tierFor(entry) {
   return entry.row.status === "failed" ? 0 : 1;
 }
 
+/** Higher = sync first. Sales + settlements before expenses so outbox never blocks checkout. */
+function syncPriority(entry) {
+  if (entry.source === "tx") return 3;
+  if (entry.source === "outbox") {
+    const k = entry.row.kind;
+    if (k === "SETTLE_PAYMENT" || k === "SETTLE_CUSTOMER_CREDIT") return 3;
+    if (k === "CREATE_EXPENSE") return 1;
+    return 2;
+  }
+  return 0;
+}
+
 async function countEligibleTotal(force) {
   const now = Date.now();
   const allTx = await getQueuedTransactions();
@@ -76,6 +98,8 @@ async function getNextMergedBatch(force) {
     ...txRows.map((row) => ({ source: "tx", row })),
     ...obRows.map((row) => ({ source: "outbox", row })),
   ].sort((a, b) => {
+    const p = syncPriority(b) - syncPriority(a);
+    if (p !== 0) return p;
     const d = tierFor(a) - tierFor(b);
     if (d !== 0) return d;
     return Number(a.row.createdAt) - Number(b.row.createdAt);
@@ -131,6 +155,11 @@ async function syncOneTransaction(item, onProgress) {
         INVENTORY_CONFLICT: "Sale not synced: stock unavailable. Review inventory and retry.",
         VALIDATION_FAILED: "Sale data is invalid. Please retry from POS.",
         TRANSIENT_SYNC_FAILURE: "Temporary sync failure. Retrying automatically.",
+        EXCEEDS_OUTSTANDING: "Amount exceeds outstanding balance.",
+        ALREADY_SETTLED: "This transaction is already fully paid.",
+        INVALID_PAYMENT_AMOUNT: "Invalid payment amount.",
+        INCONSISTENT_PAYMENT_STATE: "Payment totals could not be reconciled. Please retry.",
+        NO_OUTSTANDING_BALANCE: "No outstanding balance to apply this payment to.",
       };
       const syncError = new Error(messageByCode[code] || first?.message || "Sync failed");
       syncError.syncCode = code;
@@ -175,6 +204,33 @@ async function syncOneOutbox(item, onProgress) {
       await putProduct(pid, item.body);
     } else if (item.kind === "POST_CUSTOMER") {
       await postCustomer(item.body);
+    } else if (item.kind === "SETTLE_PAYMENT") {
+      const tid = item.body?.transaction_id;
+      if (!tid) throw new Error("Missing transaction_id for SETTLE_PAYMENT.");
+      await postSettleTransactionCredit(tid, {
+        amount: item.body.amount,
+        request_id: item.body.request_id,
+        event_id: item.body.event_id,
+      });
+    } else if (item.kind === "SETTLE_CUSTOMER_CREDIT") {
+      const cid = item.body?.customer_id;
+      if (!cid) throw new Error("Missing customer_id for SETTLE_CUSTOMER_CREDIT.");
+      await postSettleCustomerCredit(cid, {
+        amount: item.body.amount,
+        request_id: item.body.request_id,
+      });
+    } else if (item.kind === "CREATE_EXPENSE") {
+      const attempt = Number(item.retryCount || 0) + 1;
+      console.info("EXPENSE_SYNC_RETRY", { outboxId: item.id, attempt });
+      await postExpense({
+        amount: item.body.amount,
+        category: item.body.category,
+        note: item.body.note,
+        request_id: item.body.request_id,
+        event_id: item.body.event_id,
+      });
+    } else if (item.kind === "INVENTORY_COUNT_FINALIZE") {
+      await postInventoryCountFinalize(item.body);
     } else {
       throw new Error(`Unknown outbox kind: ${item.kind}`);
     }
@@ -271,6 +327,7 @@ export function useOfflineSync() {
         setSyncProgress({ done: 0, total: 0, failed: 0 });
         clearSyncSession();
         await refreshCount();
+        void maybeAutoIndexedDBBackup();
         return;
       }
 
@@ -331,9 +388,12 @@ export function useOfflineSync() {
         await queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
         await queryClient.invalidateQueries({ queryKey: ["transactions"] });
         await queryClient.invalidateQueries({ queryKey: ["customers"] });
+        await queryClient.invalidateQueries({ queryKey: ["expenses"] });
+        await queryClient.invalidateQueries({ queryKey: ["daily-summary"] });
         const finishedAt = Date.now();
         setLastSyncedAt(new Date(finishedAt).toISOString());
         setLastSuccessfulSyncAt(finishedAt);
+        void maybeAutoIndexedDBBackup();
       } finally {
         isSyncRunning = false;
         setSyncing(false);

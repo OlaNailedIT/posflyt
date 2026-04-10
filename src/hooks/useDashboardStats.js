@@ -8,7 +8,13 @@ export function useDashboardStats() {
   const isOnline = useOfflineStore((s) => s.isOnline);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const fallback = {
+    date: null,
     revenue: 0,
+    totalExpenses: 0,
+    dailyProfit: 0,
+    grossProfit: 0,
+    profit: 0,
+    profitType: "gross",
     transactions: 0,
     lowStock: 0,
     customers: 0,

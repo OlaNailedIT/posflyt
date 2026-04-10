@@ -406,7 +406,7 @@ export default function AdminMonitoringPage() {
                     onClick={() => setDetail({ kind: "tx", txId: r.id })}
                   >
                     <td className="px-3 py-2 font-mono text-xs">{r.id}</td>
-                    <td className="px-3 py-2">{r.total}</td>
+                    <td className="px-3 py-2">{r.totalAmount}</td>
                     <td className={`px-3 py-2 ${statusClass(r.syncStatus)}`} title={r.syncStatus}>
                       {r.syncStatus}
                     </td>

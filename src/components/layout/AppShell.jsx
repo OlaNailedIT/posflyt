@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import SmartAlertsBell from "../SmartAlertsBell";
+import { useNotificationStore } from "../../stores/notificationStore";
 import { useAuthStore } from "../../stores/authStore";
+import { getUsageFeatures } from "../../services/api";
 import { useOfflineStore } from "../../stores/offlineStore";
 import ThemeToggle from "../ThemeToggle";
 import SystemHealthBadge from "../SystemHealthBadge";
@@ -16,6 +20,11 @@ import QuotaBanner from "../QuotaBanner";
 
 export default function AppShell() {
   const location = useLocation();
+  const { data: usageFeatures } = useQuery({
+    queryKey: ["usage", "features"],
+    queryFn: getUsageFeatures,
+    staleTime: 60_000,
+  });
   const clearAuth = useAuthStore((s) => s.logout);
 
   const performLogout = async () => {
@@ -27,6 +36,8 @@ export default function AppShell() {
   const isOnline = useOfflineStore((s) => s.isOnline);
   const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
+  const lastSyncError = useOfflineStore((s) => s.lastSyncError);
+  const updateSyncFailureAlert = useNotificationStore((s) => s.updateSyncFailureAlert);
   const networkStability = useOfflineStore((s) => s.networkStability);
   const syncing = useOfflineStore((s) => s.syncing);
   const syncProgress = useOfflineStore((s) => s.syncProgress);
@@ -38,10 +49,15 @@ export default function AppShell() {
   const primaryLinks = [
     { to: "/dashboard", label: "Dashboard" },
     { to: "/pos", label: "POS" },
+    ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick sale" }] : []),
     { to: "/inventory", label: "Inventory" },
+    ...(usageFeatures?.flags?.INVENTORY_COUNT_MODE !== false && can(role, "editProducts")
+      ? [{ to: "/inventory/count", label: "Count" }]
+      : []),
   ];
   const secondaryLinks = [
     { to: "/customers", label: "Customers" },
+    ...(usageFeatures?.flags?.EXPENSES ? [{ to: "/expenses", label: "Expenses" }] : []),
     { to: "/usage", label: "Usage" },
     { to: "/onboarding", label: "Onboarding" },
     ...(can(role, "accessSettings") ? [{ to: "/settings", label: "Settings" }] : []),
@@ -58,10 +74,14 @@ export default function AppShell() {
   const mobilePrimaryLinks = [
     { to: "/dashboard", label: "Home", icon: "🏠" },
     { to: "/pos", label: "POS", icon: "🛒" },
+    ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick", icon: "⚡" }] : []),
     { to: "/inventory", label: "Stock", icon: "📦" },
+    ...(usageFeatures?.flags?.INVENTORY_COUNT_MODE !== false && can(role, "editProducts")
+      ? [{ to: "/inventory/count", label: "Count", icon: "🔢" }]
+      : []),
   ];
   const businessLinks = secondaryLinks.filter((l) =>
-    ["/customers", "/onboarding", "/settings", "/staff"].includes(l.to)
+    ["/customers", "/expenses", "/onboarding", "/settings", "/staff"].includes(l.to)
   );
   const systemLinks = secondaryLinks.filter((l) => ["/help"].includes(l.to));
   const adminLinks = secondaryLinks.filter((l) =>
@@ -72,6 +92,10 @@ export default function AppShell() {
     setDesktopMoreOpen(false);
     setMobileMoreOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    updateSyncFailureAlert(failedTransactions, lastSyncError);
+  }, [failedTransactions, lastSyncError, updateSyncFailureAlert]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -193,6 +217,7 @@ export default function AppShell() {
           <div className="flex flex-wrap items-center gap-2">
             <SystemHealthBadge />
             <SyncStatusIndicator />
+            <SmartAlertsBell />
             <div className="rounded-lg border border-stone-300 bg-stone-100 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300">
               Plan: {plan} · {isOnline ? "Online" : "Offline"}
               {syncing ? " · Syncing" : ""}

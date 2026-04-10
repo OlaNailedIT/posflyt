@@ -17,8 +17,11 @@ const LoginPage = lazy(() => import("../pages/LoginPage"));
 const RegisterPage = lazy(() => import("../pages/RegisterPage"));
 const DashboardPage = lazy(() => import("../pages/DashboardPage"));
 const PosPage = lazy(() => import("../pages/PosPage"));
+const QuickSalesPage = lazy(() => import("../pages/QuickSalesPage"));
 const InventoryPage = lazy(() => import("../pages/InventoryPage"));
+const InventoryCountPage = lazy(() => import("../pages/InventoryCountPage"));
 const CustomersPage = lazy(() => import("../pages/CustomersPage"));
+const ExpensesPage = lazy(() => import("../pages/ExpensesPage"));
 const ReportsPage = lazy(() => import("../pages/ReportsPage"));
 const OnboardingPage = lazy(() => import("../pages/OnboardingPage"));
 const SettingsPage = lazy(() => import("../pages/SettingsPage"));
@@ -72,8 +75,18 @@ export default function AppRouter() {
         <Route path="/usage" element={<UsageInsightsPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/pos" element={<PosPage />} />
+        <Route path="/pos/quick" element={<QuickSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
+        <Route
+          path="/inventory/count"
+          element={
+            <PermissionRoute permission="editProducts">
+              <InventoryCountPage />
+            </PermissionRoute>
+          }
+        />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/expenses" element={<ExpensesPage />} />
         <Route
           path="/onboarding"
           element={

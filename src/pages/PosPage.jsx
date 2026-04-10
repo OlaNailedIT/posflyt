@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { postTransaction } from "../services/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getUsageFeatures, postTransaction } from "../services/api";
 import { SYNC_STATUS } from "../constants/syncStatus";
 import {
   enqueueOutbox,
@@ -16,32 +16,34 @@ import { useOfflineStore } from "../stores/offlineStore";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useToastStore } from "../stores/toastStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { formatMoney } from "../utils/currency";
+import { formatMoney, roundCurrency } from "../utils/currency";
+
+function unitLabel(unitType) {
+  const u = unitType || "unit";
+  if (u === "kg") return "kg";
+  if (u === "litre") return "L";
+  return "";
+}
+
+function formatShelfPrice(p, symbol) {
+  const u = p.unitType || "unit";
+  if (u === "unit") return formatMoney(p.price, symbol);
+  const rate = p.pricePerUnit ?? p.price;
+  return `${formatMoney(rate, symbol)}/${u === "kg" ? "kg" : "L"}`;
+}
 import { useCustomers } from "../hooks/useCustomers";
 import ReceiptModal from "../components/pos/ReceiptModal";
 import { calculateTaxTotal } from "../domain/tax";
+import { buildCheckoutPayload } from "../domain/posCheckout";
 import { isRecoverableNetworkError } from "../utils/networkError";
 import { explainSyncError } from "../utils/syncErrorMessages";
 
-function buildCheckoutPayload({
-  items,
-  total,
-  clientTransactionId,
-  customerId,
-  createdAt,
-}) {
-  return {
-    client_transaction_id: clientTransactionId,
-    created_at: createdAt,
-    customer_id: customerId || undefined,
-    payment_method: "CASH",
-    items: items.map((item) => ({
-      product_id: item.id,
-      quantity: item.quantity,
-    })),
-    total,
-  };
-}
+const SPLIT_METHOD_OPTIONS = [
+  { value: "CASH", label: "Cash" },
+  { value: "CARD", label: "Card" },
+  { value: "TRANSFER", label: "Transfer" },
+  { value: "MOBILE", label: "Mobile" },
+];
 
 const card =
   "rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900";
@@ -89,6 +91,24 @@ export default function PosPage() {
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
   const { refreshCount, syncSingleTransaction } = useOfflineSync();
   const [localQueue, setLocalQueue] = useState([]);
+  const [creditSaleEnabled, setCreditSaleEnabled] = useState(false);
+  const [creditOption, setCreditOption] = useState("full");
+  const [partialAmountInput, setPartialAmountInput] = useState("");
+  const [dueDateInput, setDueDateInput] = useState("");
+  const [splitPaymentEnabled, setSplitPaymentEnabled] = useState(false);
+  const [splitLines, setSplitLines] = useState([
+    { type: "CASH", amount: "" },
+    { type: "TRANSFER", amount: "" },
+  ]);
+
+  const { data: usageFeatures } = useQuery({
+    queryKey: ["usage", "features"],
+    queryFn: getUsageFeatures,
+    staleTime: 60_000,
+  });
+  const creditFeatureOn = Boolean(usageFeatures?.flags?.CREDIT_SALES);
+
+  const [measureModal, setMeasureModal] = useState(null);
 
   const loadLocalQueue = useCallback(async () => {
     const rows = await getQueuedTransactions();
@@ -116,19 +136,68 @@ export default function PosPage() {
     [products, query]
   );
 
+  const selectedCustomer = useMemo(
+    () => (selectedCustomerId ? customers.find((c) => c.id === selectedCustomerId) : null),
+    [customers, selectedCustomerId]
+  );
+
   const subtotal = getTotal();
   const { rate: taxRate, taxAmount } = calculateTaxTotal(subtotal, settings);
   const total = subtotal + taxAmount;
 
   const onCheckout = async () => {
     if (!items.length) return;
+    const useCredit = creditFeatureOn && creditSaleEnabled;
+    if (useCredit && splitPaymentEnabled) {
+      showToast("Turn off split payment for credit sales.", "error");
+      return;
+    }
+    if (splitPaymentEnabled && !useCredit) {
+      const parsed = splitLines
+        .map((l) => ({ type: l.type, amount: roundCurrency(Number(l.amount)) }))
+        .filter((l) => l.amount > 0);
+      if (parsed.length < 2) {
+        showToast("Split payment needs at least two lines with amounts greater than zero.", "error");
+        return;
+      }
+      const sum = roundCurrency(parsed.reduce((s, l) => s + l.amount, 0));
+      if (Math.abs(sum - total) >= 0.005) {
+        showToast("Split amounts must add up to the sale total.", "error");
+        return;
+      }
+    }
+    if (useCredit && (creditOption === "partial" || creditOption === "credit") && !selectedCustomerId) {
+      showToast("Select a customer for partial or credit sales.", "error");
+      return;
+    }
+    if (useCredit && creditOption === "partial") {
+      const paid = Number(partialAmountInput);
+      if (!Number.isFinite(paid) || paid <= 0 || paid >= total) {
+        showToast("Enter a valid partial amount paid (greater than 0 and less than total).", "error");
+        return;
+      }
+    }
     const clientTransactionId = crypto.randomUUID();
+    const syncEventId = crypto.randomUUID();
+    let splitPayments;
+    if (splitPaymentEnabled && !useCredit) {
+      splitPayments = splitLines
+        .map((l) => ({ type: l.type, amount: roundCurrency(Number(l.amount)) }))
+        .filter((l) => l.amount > 0);
+    }
+
     const payload = buildCheckoutPayload({
       items,
       total,
       clientTransactionId,
       customerId: selectedCustomerId,
       createdAt: new Date().toISOString(),
+      creditMode: useCredit,
+      creditOption: useCredit ? creditOption : "full",
+      amountPaid: useCredit && creditOption === "partial" ? Number(partialAmountInput) : undefined,
+      dueDate: useCredit && creditOption === "credit" ? dueDateInput : undefined,
+      eventId: syncEventId,
+      splitPayments,
     });
 
     setLoading(true);
@@ -144,6 +213,14 @@ export default function PosPage() {
               INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
               VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
               TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
+              FEATURE_DISABLED: "Credit feature is disabled.",
+              EXCEEDS_OUTSTANDING: "Amount exceeds outstanding balance.",
+              ALREADY_SETTLED: "This transaction is already fully paid.",
+              INVALID_PAYMENT_AMOUNT: "Invalid payment amount.",
+              INCONSISTENT_PAYMENT_STATE: "Payment totals could not be reconciled. Please retry.",
+              NO_OUTSTANDING_BALANCE: "No outstanding balance to apply this payment to.",
+              PAYMENT_SPLIT_MISMATCH: "Split payment amounts must add up to the sale total.",
+              INVALID_ITEM_QUANTITY: "Enter a valid quantity (whole units for countable items, decimals for kg or litres).",
             };
             throw new Error(messageByCode[first.code] || first.message || "Checkout failed.");
           }
@@ -152,6 +229,15 @@ export default function PosPage() {
           queryClient.invalidateQueries({ queryKey: ["products"] });
           showToast("Sale completed.", "success");
           clearCart();
+          setCreditSaleEnabled(false);
+          setCreditOption("full");
+          setPartialAmountInput("");
+          setDueDateInput("");
+          setSplitPaymentEnabled(false);
+          setSplitLines([
+            { type: "CASH", amount: "" },
+            { type: "TRANSFER", amount: "" },
+          ]);
         } catch (error) {
           if (isRecoverableNetworkError(error)) {
             await enqueueTransaction(payload);
@@ -162,6 +248,11 @@ export default function PosPage() {
               "success"
             );
             clearCart();
+            setSplitPaymentEnabled(false);
+            setSplitLines([
+              { type: "CASH", amount: "" },
+              { type: "TRANSFER", amount: "" },
+            ]);
           } else {
             showToast(error.message || "Checkout failed. Try again.", "error");
           }
@@ -172,6 +263,11 @@ export default function PosPage() {
         await loadLocalQueue();
         showToast("Saved offline. Will sync when you are back online.", "success");
         clearCart();
+        setSplitPaymentEnabled(false);
+        setSplitLines([
+          { type: "CASH", amount: "" },
+          { type: "TRANSFER", amount: "" },
+        ]);
       }
     } finally {
       setLoading(false);
@@ -187,6 +283,16 @@ export default function PosPage() {
       <p className="mt-1 text-sm font-semibold text-teal-700 dark:text-teal-400">
         Works even when your internet is down.
       </p>
+      {usageFeatures?.flags?.QUICK_SALES_MODE !== false && (
+        <div className="mt-3">
+          <Link
+            to="/pos/quick"
+            className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-teal-700 dark:bg-teal-500 dark:text-stone-950"
+          >
+            Quick sale mode — one screen
+          </Link>
+        </div>
+      )}
       {!isOnline && (
         <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
           Offline mode active. Sales are saved locally and will sync when internet returns.
@@ -277,19 +383,28 @@ export default function PosPage() {
                 </div>
               </div>
             )}
-            {filtered.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => addToCart(p)}
-                className={`flex min-h-14 items-center justify-between ${lineItem} p-3 text-left text-base transition hover:border-teal-300 hover:bg-teal-50 dark:hover:border-teal-700 dark:hover:bg-stone-800`}
-              >
-                <span>{p.name}</span>
-                <span className="font-semibold text-teal-800 dark:text-teal-400">
-                  {formatMoney(p.price, settings.currencySymbol)}
-                </span>
-              </button>
-            ))}
+            {filtered.map((p) => {
+              const isMeasured = p.unitType && p.unitType !== "unit";
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    if (isMeasured) {
+                      setMeasureModal({ product: p, quantityInput: "1" });
+                    } else {
+                      addToCart(p);
+                    }
+                  }}
+                  className={`flex min-h-14 items-center justify-between ${lineItem} p-3 text-left text-base transition hover:border-teal-300 hover:bg-teal-50 dark:hover:border-teal-700 dark:hover:bg-stone-800`}
+                >
+                  <span>{p.name}</span>
+                  <span className="font-semibold text-teal-800 dark:text-teal-400">
+                    {formatShelfPrice(p, settings.currencySymbol)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -309,6 +424,14 @@ export default function PosPage() {
                 </option>
               ))}
             </select>
+            {creditFeatureOn &&
+              selectedCustomer &&
+              Number(selectedCustomer.totalOutstanding || 0) > 0 && (
+                <div className="mt-2 rounded bg-yellow-100 p-2 text-sm text-yellow-900 dark:bg-yellow-950/40 dark:text-yellow-100">
+                  This customer owes{" "}
+                  {formatMoney(Number(selectedCustomer.totalOutstanding), settings.currencySymbol)}
+                </div>
+              )}
             <div className="grid gap-2 sm:grid-cols-3">
               <input
                 className={input}
@@ -385,24 +508,42 @@ export default function PosPage() {
                     Remove
                   </button>
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-stone-300 px-3 py-1 text-base dark:border-stone-600"
-                    onClick={() => setQuantity(item.id, item.quantity - 1)}
-                  >
-                    -
-                  </button>
-                  <span>{item.quantity}</span>
-                  <button
-                    type="button"
-                    className="rounded border border-stone-300 px-3 py-1 text-base dark:border-stone-600"
-                    onClick={() => setQuantity(item.id, item.quantity + 1)}
-                  >
-                    +
-                  </button>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {(item.unitType || "unit") !== "unit" ? (
+                    <>
+                      <label className="text-xs text-stone-500 dark:text-stone-400">
+                        Qty ({unitLabel(item.unitType)})
+                      </label>
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="0.01"
+                        className={`${input} w-28`}
+                        value={item.quantity}
+                        onChange={(e) => setQuantity(item.id, e.target.value)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded border border-stone-300 px-3 py-1 text-base dark:border-stone-600"
+                        onClick={() => setQuantity(item.id, item.quantity - 1)}
+                      >
+                        -
+                      </button>
+                      <span>{item.quantity}</span>
+                      <button
+                        type="button"
+                        className="rounded border border-stone-300 px-3 py-1 text-base dark:border-stone-600"
+                        onClick={() => setQuantity(item.id, item.quantity + 1)}
+                      >
+                        +
+                      </button>
+                    </>
+                  )}
                   <span className="ml-auto font-medium">
-                    {formatMoney(item.quantity * item.price, settings.currencySymbol)}
+                    {formatMoney(roundCurrency(item.quantity * item.unitPrice), settings.currencySymbol)}
                   </span>
                 </div>
               </div>
@@ -422,6 +563,157 @@ export default function PosPage() {
               {formatMoney(total, settings.currencySymbol)}
             </span>
           </div>
+
+          <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-950">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
+              <input
+                type="checkbox"
+                checked={splitPaymentEnabled}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setSplitPaymentEnabled(v);
+                  if (v) setCreditSaleEnabled(false);
+                }}
+                className="rounded border-stone-400"
+              />
+              Split payment (cash, transfer, card, etc.)
+            </label>
+            {splitPaymentEnabled && (
+              <div className="mt-3 space-y-2 text-sm">
+                {splitLines.map((line, idx) => (
+                  <div key={`split-${idx}`} className="flex flex-wrap items-center gap-2">
+                    <select
+                      className={`${input} min-w-[120px]`}
+                      value={line.type}
+                      onChange={(e) => {
+                        const next = [...splitLines];
+                        next[idx] = { ...next[idx], type: e.target.value };
+                        setSplitLines(next);
+                      }}
+                    >
+                      {SPLIT_METHOD_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className={`${input} max-w-[160px]`}
+                      placeholder="Amount"
+                      value={line.amount}
+                      onChange={(e) => {
+                        const next = [...splitLines];
+                        next[idx] = { ...next[idx], amount: e.target.value };
+                        setSplitLines(next);
+                      }}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="text-xs font-medium text-teal-700 underline dark:text-teal-400"
+                  onClick={() => setSplitLines((prev) => [...prev, { type: "CASH", amount: "" }])}
+                >
+                  Add payment line
+                </button>
+                <p className="text-xs text-stone-600 dark:text-stone-400">
+                  At least two lines with amounts &gt; 0. Must sum to{" "}
+                  {formatMoney(total, settings.currencySymbol)}.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {creditFeatureOn && (
+            <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-950">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
+                <input
+                  type="checkbox"
+                  checked={creditSaleEnabled}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setCreditSaleEnabled(v);
+                    if (v) setSplitPaymentEnabled(false);
+                  }}
+                  className="rounded border-stone-400"
+                />
+                Mark as credit sale
+              </label>
+              {creditSaleEnabled && (
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="space-y-1">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="creditOpt"
+                        checked={creditOption === "full"}
+                        onChange={() => setCreditOption("full")}
+                      />
+                      Full payment now
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="creditOpt"
+                        checked={creditOption === "partial"}
+                        onChange={() => setCreditOption("partial")}
+                      />
+                      Partial payment
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="creditOpt"
+                        checked={creditOption === "credit"}
+                        onChange={() => setCreditOption("credit")}
+                      />
+                      Credit (pay later)
+                    </label>
+                  </div>
+                  {creditOption === "partial" && (
+                    <div>
+                      <label className="text-xs text-stone-600 dark:text-stone-400">Amount paid now</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className={input}
+                        value={partialAmountInput}
+                        onChange={(e) => setPartialAmountInput(e.target.value)}
+                        placeholder="0.00"
+                      />
+                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                        Remaining:{" "}
+                        {formatMoney(
+                          Math.max(
+                            0,
+                            total -
+                              (Number.isFinite(Number(partialAmountInput)) ? Number(partialAmountInput) : 0)
+                          ),
+                          settings.currencySymbol
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  {creditOption === "credit" && (
+                    <div>
+                      <label className="text-xs text-stone-600 dark:text-stone-400">Due date (optional)</label>
+                      <input
+                        type="datetime-local"
+                        className={input}
+                        value={dueDateInput}
+                        onChange={(e) => setDueDateInput(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={onCheckout}
@@ -432,6 +724,49 @@ export default function PosPage() {
           </button>
         </div>
       </div>
+      {measureModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl dark:bg-stone-900">
+            <h3 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
+              Quantity ({unitLabel(measureModal.product.unitType)})
+            </h3>
+            <p className="mt-1 text-sm text-stone-600 dark:text-stone-400">{measureModal.product.name}</p>
+            <input
+              type="number"
+              min="0.001"
+              step="0.01"
+              className={`${input} mt-3 w-full`}
+              value={measureModal.quantityInput}
+              onChange={(e) => setMeasureModal((m) => (m ? { ...m, quantityInput: e.target.value } : m))}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-stone-300 px-3 py-2 text-sm dark:border-stone-600"
+                onClick={() => setMeasureModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white"
+                onClick={() => {
+                  const q = Number(measureModal.quantityInput);
+                  if (!Number.isFinite(q) || q <= 0) {
+                    showToast("Enter a quantity greater than zero.", "error");
+                    return;
+                  }
+                  addToCart(measureModal.product, { quantity: q });
+                  setMeasureModal(null);
+                }}
+              >
+                Add to cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />
     </section>
   );

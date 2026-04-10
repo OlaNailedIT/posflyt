@@ -1,10 +1,13 @@
 import { useState } from "react";
 
-export default function ExpandableSection({ title, children, defaultOpen = false, className = "" }) {
+export default function ExpandableSection({ title, children, defaultOpen = false, className = "", id }) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className={`rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900 ${className}`}>
+    <section
+      id={id}
+      className={`rounded-xl border border-stone-200 bg-white p-3 dark:border-stone-700 dark:bg-stone-900 ${className}`}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

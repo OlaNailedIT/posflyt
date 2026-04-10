@@ -10,8 +10,10 @@ const defaultSettings = {
   businessName: "",
   businessEmail: "",
   businessPhone: "",
+  businessTimeZone: "UTC",
   logoUrl: "",
   receiptLayout: "STANDARD",
+  quickSalesProductIds: null,
 };
 
 export const useSettingsStore = create((set) => ({

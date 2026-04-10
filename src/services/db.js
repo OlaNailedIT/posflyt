@@ -2,7 +2,7 @@ import { openDB } from "idb";
 import { SYNC_STATUS } from "../constants/syncStatus.js";
 
 const DB_NAME = "posflyt-offline-db";
-const DB_VERSION = 3;
+const DB_VERSION = 9;
 
 /** Stop retrying after this many failed sync attempts (per queued row). */
 export const MAX_SYNC_RETRIES = 5;
@@ -15,9 +15,10 @@ const STORES = {
   transactionsQueue: "transactions_queue",
   customersCache: "customers_cache",
   outbox: "outbox",
+  inventoryCountSession: "inventory_count_session",
 };
 
-/** @typedef {'POST_PRODUCT'|'PUT_PRODUCT'|'POST_CUSTOMER'} OutboxKind */
+/** @typedef {'POST_PRODUCT'|'PUT_PRODUCT'|'POST_CUSTOMER'|'SETTLE_PAYMENT'|'SETTLE_CUSTOMER_CREDIT'|'CREATE_EXPENSE'|'INVENTORY_COUNT_FINALIZE'} OutboxKind */
 
 let dbPromise;
 
@@ -43,10 +44,50 @@ function getDb() {
           }
         }
         // v3: transaction queue rows carry syncStatus / client_transaction_id / syncError (see normalizeQueuedTransaction).
+        // v4: outbox kind SETTLE_PAYMENT for credit settlement replay.
+        // v5: outbox kind CREATE_EXPENSE for offline expense capture (Phase 7.10.2).
+        // v6: transaction queue payloads may include `payments` split tender (Phase 7.10.4); same object store.
+        // v7: cached products may include unitType / pricePerUnit (Phase 7.11.1 weighted products).
+        // v8: settings cache may include quickSalesProductIds (Phase 7.11.2).
+        // v9: draft inventory count session (Phase 7.11.4).
+        if (oldVersion < 9) {
+          if (!db.objectStoreNames.contains(STORES.inventoryCountSession)) {
+            db.createObjectStore(STORES.inventoryCountSession, { keyPath: "id" });
+          }
+        }
       },
     });
   }
   return dbPromise;
+}
+
+const INVENTORY_COUNT_DRAFT_ID = "draft";
+
+/**
+ * Persist in-progress barcode count session (offline-safe).
+ * @param {{ sessionId: string, sessionStatus: string, lines: unknown[], savedAt?: number }} state
+ */
+export async function saveInventoryCountDraft(state) {
+  const db = await getDb();
+  await db.put(STORES.inventoryCountSession, {
+    id: INVENTORY_COUNT_DRAFT_ID,
+    ...state,
+    savedAt: Date.now(),
+  });
+}
+
+export async function getInventoryCountDraft() {
+  const db = await getDb();
+  return db.get(STORES.inventoryCountSession, INVENTORY_COUNT_DRAFT_ID);
+}
+
+export async function clearInventoryCountDraft() {
+  const db = await getDb();
+  try {
+    await db.delete(STORES.inventoryCountSession, INVENTORY_COUNT_DRAFT_ID);
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Map legacy `status` to SYNC_STATUS (single source of truth is syncStatus when present). */
@@ -129,10 +170,15 @@ export async function enqueueTransaction(transactionPayload) {
     transactionPayload?.client_transaction_id ||
     `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const client_transaction_id = transactionPayload?.client_transaction_id || id;
+  const payload = {
+    ...transactionPayload,
+    event_id: transactionPayload?.event_id || crypto.randomUUID(),
+  };
   const entry = {
     id,
     client_transaction_id,
-    payload: transactionPayload,
+    type: "CREATE_TRANSACTION",
+    payload,
     createdAt: Date.now(),
     status: "pending",
     syncStatus: SYNC_STATUS.PENDING,
@@ -416,6 +462,46 @@ export async function markOutboxSyncing(id) {
   };
   await db.put(STORES.outbox, next);
   return next;
+}
+
+/**
+ * Full export of all offline object stores (Phase 7.13.3 cloud backup).
+ * @returns {Promise<{ dbName: string, dbVersion: number, exportedAt: string, stores: Record<string, unknown[]> }>}
+ */
+export async function exportIndexedDBFullSnapshot() {
+  const db = await getDb();
+  const stores = {};
+  for (const name of Object.values(STORES)) {
+    stores[name] = await db.getAll(name);
+  }
+  return {
+    dbName: DB_NAME,
+    dbVersion: DB_VERSION,
+    exportedAt: new Date().toISOString(),
+    stores,
+  };
+}
+
+/**
+ * Replace all offline stores with a snapshot from `exportIndexedDBFullSnapshot`.
+ * Overwrites existing local data; caller should confirm with the user first.
+ */
+export async function importIndexedDBFullSnapshot(snapshot) {
+  if (!snapshot?.stores || typeof snapshot.stores !== "object" || Array.isArray(snapshot.stores)) {
+    throw new Error("INVALID_SNAPSHOT");
+  }
+  const db = await getDb();
+  const names = Object.values(STORES);
+  const tx = db.transaction(names, "readwrite");
+  for (const storeName of names) {
+    const rows = Array.isArray(snapshot.stores[storeName]) ? snapshot.stores[storeName] : [];
+    const store = tx.objectStore(storeName);
+    await store.clear();
+    for (const row of rows) {
+      await store.put(row);
+    }
+  }
+  await tx.done;
 }
 
 export async function markOutboxFailed(id, errorMessage, errorCode = null) {

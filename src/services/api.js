@@ -118,7 +118,7 @@ api.interceptors.response.use(
     }
     if (status === 403 && apiCode === "FEATURE_DISABLED") {
       useToastStore.getState().showToast(
-        error.response?.data?.message || "This feature is not enabled for your plan.",
+        error.response?.data?.message || "Credit feature is disabled.",
         "error"
       );
       return Promise.reject(error);
@@ -186,9 +186,35 @@ export async function putProduct(id, body) {
   return unwrap(data);
 }
 
+/** Phase 7.11.4: server lookup by sanitized barcode (requires INVENTORY_COUNT_MODE). */
+export async function getProductByBarcode(code) {
+  const encoded = encodeURIComponent(String(code ?? "").trim());
+  const { data } = await api.get(`/products/barcode/${encoded}`);
+  return unwrap(data);
+}
+
+export async function postInventoryCountFinalize(body) {
+  const { data } = await api.post("/inventory-count/finalize", body);
+  return unwrap(data);
+}
+
+export async function postInventoryCountSessionEvent(body) {
+  const { data } = await api.post("/inventory-count/session-event", body);
+  return unwrap(data);
+}
+
 export async function postTransaction(payload) {
   const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
   return unwrap(data);
+}
+
+/** Phase 7.12.1: download PDF with auth (same bytes as public link). */
+export async function downloadTransactionReceiptPdf(transactionId) {
+  const { data } = await api.get(`/transactions/${transactionId}/receipt`, {
+    responseType: "blob",
+    timeout: 60_000,
+  });
+  return data;
 }
 
 export async function getDashboardStats() {
@@ -344,6 +370,21 @@ export async function putCustomer(id, payload) {
   return unwrap(data);
 }
 
+/** Phase 7.10.1: apply payment against customer credit balance (admin). */
+export async function postSettleCustomerCredit(customerId, payload) {
+  const { data } = await api.post(`/customers/${encodeURIComponent(customerId)}/settle-credit`, payload);
+  return unwrap(data);
+}
+
+/** Settle against a single sale row (admin). */
+export async function postSettleTransactionCredit(transactionId, payload) {
+  const { data } = await api.post(
+    `/transactions/${encodeURIComponent(transactionId)}/settle-credit`,
+    payload
+  );
+  return unwrap(data);
+}
+
 export async function getSalesReport(params) {
   const { data } = await api.get("/reports/sales", { params });
   return unwrap(data);
@@ -447,6 +488,39 @@ export async function getUsageFeatures() {
   return unwrap(data);
 }
 
+/** Phase 7.12.3: log WhatsApp receipt deep-link attempt (observability). */
+export async function postWhatsAppReceiptAttempt(body) {
+  const { data } = await api.post("/usage/whatsapp-receipt-attempt", body);
+  return unwrap(data);
+}
+
+/** Phase 7.10.2: expenses (feature-gated server-side). */
+export async function postExpense(payload) {
+  const { data } = await api.post("/expenses", payload);
+  return unwrap(data);
+}
+
+export async function getExpenses(params) {
+  const { data } = await api.get("/expenses", { params });
+  return unwrap(data);
+}
+
+export async function getDailySummary(params) {
+  const { data } = await api.get("/reports/daily-summary", { params });
+  return unwrap(data);
+}
+
+/** Phase 7.12.4: today’s sales metrics for owner summary (business timezone on Settings). */
+export async function getOwnerDailySummary() {
+  const { data } = await api.get("/reports/owner-daily-summary");
+  return unwrap(data);
+}
+
+export async function getExpenseMeta() {
+  const { data } = await api.get("/expenses/meta");
+  return unwrap(data);
+}
+
 /** Phase 8: newsletter / lead capture (CRM hooks in ops). */
 export async function postMarketingLead(payload) {
   const { data } = await api.post("/marketing/leads", payload);
@@ -481,6 +555,18 @@ export async function getBackups() {
 
 export async function getRecoveryInfo() {
   const { data } = await api.get("/backups/recovery-info");
+  return unwrap(data);
+}
+
+/** Phase 7.13.3: upload full IndexedDB snapshot (admin). */
+export async function postIndexedDBBackup(snapshot) {
+  const { data } = await api.post("/backups/indexeddb", { snapshot });
+  return unwrap(data);
+}
+
+/** Download backup payload; use `snapshot` for INDEXEDDB restores. */
+export async function downloadBackupPayload(backupId) {
+  const { data } = await api.get(`/backups/${backupId}/download`);
   return unwrap(data);
 }
 

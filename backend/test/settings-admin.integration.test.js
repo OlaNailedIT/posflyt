@@ -226,6 +226,7 @@ test("daily close status and confirmation", async () => {
   assert.equal(closeRes.status, 200);
   assert.equal(closeRes.body.status, "ok");
   assert.equal(closeRes.body.data.isClosed, true);
+  assert.ok(closeRes.body.data.closeSummary?.dailyCloseId);
 
   const cashierCloseRes = await request(app)
     .post("/admin/daily-close")

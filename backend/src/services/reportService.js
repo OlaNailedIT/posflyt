@@ -16,22 +16,22 @@ async function getSalesReport(businessId, from, to) {
   const [aggregate, transactions] = await Promise.all([
     prisma.transaction.aggregate({
       where,
-      _sum: { total: true },
+      _sum: { totalAmount: true },
       _count: { _all: true },
     }),
     prisma.transaction.findMany({
       where,
-      select: { id: true, total: true, createdAt: true },
+      select: { id: true, totalAmount: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     }),
   ]);
 
   return {
-    totalSales: Number(aggregate._sum.total || 0),
+    totalSales: Number(aggregate._sum.totalAmount || 0),
     transactionsCount: aggregate._count._all,
     trend: transactions.map((tx) => ({
       id: tx.id,
-      total: Number(tx.total),
+      total: Number(tx.totalAmount),
       createdAt: tx.createdAt,
     })),
   };

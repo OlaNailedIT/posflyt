@@ -1,26 +1,27 @@
 const prisma = require("../config/prisma");
+const { roundCurrency } = require("../utils/paymentState");
+const { assertExpenseConsistency } = require("./expenseService");
+const { getBusinessDayRange } = require("../utils/businessDayRange");
+const { isLowStockCondition } = require("../utils/lowStock");
 
-function startOfUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
-}
-
-function endOfUtcDay(date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
-}
-
-async function getDashboardStats(businessId) {
+async function getDashboardStats(businessId, options = {}) {
+  const lowStockAlertsEnabled = Boolean(options.lowStockAlertsEnabled);
   const now = new Date();
-  const dayStart = startOfUtcDay(now);
-  const dayEnd = endOfUtcDay(now);
+  /** Explicit UTC business day until per-business IANA zone is stored on Settings. */
+  const { from: dayStart, to: dayEnd } = getBusinessDayRange(now, "UTC");
   const todayWhere = { businessId, createdAt: { gte: dayStart, lte: dayEnd } };
 
-  const [revenueAgg, transactionsToday, customersCount, recurringCustomersRaw, inventorySnapshot] =
+  const [revenueAgg, transactionsToday, expenseTodayAgg, customersCount, recurringCustomersRaw, inventorySnapshot] =
     await Promise.all([
     prisma.transaction.aggregate({
       where: todayWhere,
-      _sum: { total: true },
+      _sum: { totalAmount: true },
     }),
     prisma.transaction.count({ where: todayWhere }),
+    prisma.expense.aggregate({
+      where: todayWhere,
+      _sum: { amount: true },
+    }),
     prisma.customer.count({ where: { businessId } }),
     prisma.transaction.groupBy({
       by: ["customerId"],
@@ -37,22 +38,41 @@ async function getDashboardStats(businessId) {
     }),
   ]);
 
-  const lowStockProducts = inventorySnapshot
-    .filter((p) => Number(p.stock) <= Number(p.lowStockThreshold || 10))
-    .slice(0, 25)
-    .map(({ updatedAt, ...p }) => p);
+  const lowStockProducts = lowStockAlertsEnabled
+    ? inventorySnapshot
+        .filter((p) => isLowStockCondition(Number(p.stock), p.lowStockThreshold))
+        .slice(0, 25)
+        .map(({ updatedAt, ...p }) => p)
+    : [];
   const lowStockCount = lowStockProducts.length;
 
+  const revenue = roundCurrency(Number(revenueAgg._sum.totalAmount || 0));
+  const rawExpenseSum = Number(expenseTodayAgg._sum.amount || 0);
+  const totalExpenses = assertExpenseConsistency(rawExpenseSum);
+  const grossProfit = roundCurrency(revenue - totalExpenses);
+  const dailyProfit = grossProfit;
+  const summaryDate = dayStart.toISOString().slice(0, 10);
+
   return {
-    revenue: Number(revenueAgg._sum.total || 0),
+    date: summaryDate,
+    revenue,
+    totalExpenses,
+    dailyProfit,
+    grossProfit,
+    profit: grossProfit,
+    profitType: "gross",
     transactions: transactionsToday,
     lowStock: lowStockCount,
     customers: customersCount,
     returningCustomers: recurringCustomersRaw.length,
-    lowStockProducts: lowStockProducts.map((p) => ({
-      ...p,
-      isCritical: Number(p.stock) <= Math.max(1, Math.floor(Number(p.lowStockThreshold) / 2)),
-    })),
+    lowStockProducts: lowStockProducts.map((p) => {
+      const thr = Number(p.lowStockThreshold);
+      const half = Number.isFinite(thr) && thr > 0 ? Math.max(1, Math.floor(thr / 2)) : 1;
+      return {
+        ...p,
+        isCritical: Number(p.stock) <= half,
+      };
+    }),
   };
 }
 

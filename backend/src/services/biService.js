@@ -111,11 +111,11 @@ async function getSnapshot(businessId, query) {
     ] = await Promise.all([
       prisma.transaction.aggregate({
         where: txWhere,
-        _sum: { total: true },
+        _sum: { totalAmount: true },
       }),
       prisma.transaction.aggregate({
         where: txWherePrev,
-        _sum: { total: true },
+        _sum: { totalAmount: true },
       }),
       prisma.transaction.count({ where: txWhere }),
       prisma.transaction.count({ where: { ...txWhere, syncStatus: "FAILED" } }),
@@ -143,6 +143,8 @@ async function getSnapshot(businessId, query) {
         SELECT COUNT(*)::int AS c
         FROM "Product"
         WHERE "businessId" = ${businessId}
+          AND "lowStockThreshold" IS NOT NULL
+          AND "lowStockThreshold" > 0
           AND "stock" <= "lowStockThreshold"
       `,
       prisma.settings.findUnique({
@@ -185,7 +187,7 @@ async function getSnapshot(businessId, query) {
       }),
       prisma.$queryRawUnsafe(
         `SELECT date_trunc('${u}', t."createdAt" AT TIME ZONE 'UTC') AS bucket,
-                COALESCE(SUM(t."total"), 0)::float AS revenue,
+                COALESCE(SUM(t."totalAmount"), 0)::float AS revenue,
                 COUNT(*)::int AS tx_count
          FROM "Transaction" t
          WHERE t."businessId" = $1 AND t."createdAt" >= $2 AND t."createdAt" <= $3
@@ -224,8 +226,8 @@ async function getSnapshot(businessId, query) {
       `,
     ]);
 
-    const revenue = Number(revenueAgg._sum.total || 0);
-    const revenuePrev = Number(revenuePrevAgg._sum.total || 0);
+    const revenue = Number(revenueAgg._sum.totalAmount || 0);
+    const revenuePrev = Number(revenuePrevAgg._sum.totalAmount || 0);
     const revenueChangePct = revenuePrev > 0 ? (revenue - revenuePrev) / revenuePrev : revenue > 0 ? 1 : 0;
 
     const paymentTotal = paymentStats.reduce((a, s) => a + s._count._all, 0);
@@ -386,8 +388,12 @@ async function listTransactionsDrilldown(businessId, query) {
 
   const sanitized = rows.map((r) => ({
     id: r.id,
-    total: r.total,
+    total: r.totalAmount,
+    totalAmount: r.totalAmount,
     paymentMethod: r.paymentMethod,
+    paymentStatus: r.paymentStatus,
+    amountPaid: r.amountPaid,
+    balanceDue: r.balanceDue,
     createdAt: r.createdAt,
     syncStatus: r.syncStatus,
     customer: r.customer

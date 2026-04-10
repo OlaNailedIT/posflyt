@@ -1,6 +1,6 @@
 const prisma = require("../config/prisma");
 
-const TX_SORT_FIELDS = new Set(["createdAt", "total", "syncStatus"]);
+const TX_SORT_FIELDS = new Set(["createdAt", "totalAmount", "syncStatus"]);
 const ORDER = new Set(["asc", "desc"]);
 
 /** Mask email for list responses (PII hygiene). */
@@ -76,7 +76,7 @@ async function listTransactionsPaginated(businessId, query) {
 
   const sanitized = rows.map((r) => ({
     id: r.id,
-    total: r.total,
+    totalAmount: r.totalAmount,
     paymentMethod: r.paymentMethod,
     createdAt: r.createdAt,
     syncedAt: r.syncedAt,

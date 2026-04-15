@@ -5,6 +5,7 @@ import { useAuthStore } from "../stores/authStore";
 import { useConflictStore } from "../stores/conflictStore";
 import { useToastStore } from "../stores/toastStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
+import { showFriendlyErrorToast } from "../utils/friendlyApiError";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -17,6 +18,21 @@ function unwrap(data) {
     : data;
 }
 
+/**
+ * Phase 2 Step 6 — `postTransaction` / `postTransactionReturn` must only run from
+ * `executeFinancialEvent` (re-entrancy-safe depth counter).
+ */
+let _ufecFinancialApiDepth = 0;
+
+/** @internal Used exclusively by executeFinancialEvent */
+export function ufecFinancialApiEnter() {
+  _ufecFinancialApiDepth += 1;
+}
+
+export function ufecFinancialApiExit() {
+  _ufecFinancialApiDepth = Math.max(0, _ufecFinancialApiDepth - 1);
+}
+
 /** In-memory token first (fresh login), then `auth_token` / persisted Zustand. */
 function resolveAuthToken() {
   const fromStore = useAuthStore.getState().token;
@@ -27,7 +43,7 @@ function resolveAuthToken() {
 /** Login/register failures: do not logout or retry. */
 function isAuthRouteRequest(config) {
   const url = String(config?.url || "");
-  return /\/auth\//.test(url);
+  return /\/auth\//.test(url) || url.includes("/staff/accept-invite");
 }
 
 function isRefreshRequest(config) {
@@ -86,6 +102,9 @@ api.interceptors.response.use(
     }
     if (!error.response) {
       error.isNetworkError = true;
+      if (!isAuthRouteRequest(error.config) && !error.config?.skipGlobalToast) {
+        showFriendlyErrorToast(error, (m, k) => useToastStore.getState().showToast(m, k));
+      }
       return Promise.reject(error);
     }
 
@@ -130,7 +149,18 @@ api.interceptors.response.use(
       );
       return Promise.reject(error);
     }
+    if (status >= 500 && status < 600 && config && !isAuthRouteRequest(config) && !config?.skipGlobalToast) {
+      showFriendlyErrorToast(error, (m, k) => useToastStore.getState().showToast(m, k));
+      return Promise.reject(error);
+    }
+    // Session invalidation: only 401 (after refresh retry rules below). Never logout on generic network/5xx.
     if (status !== 401 || !config) {
+      return Promise.reject(error);
+    }
+
+    const offlineOnly =
+      useAuthStore.getState().offlineSessionActive && !useAuthStore.getState().token;
+    if (offlineOnly && typeof navigator !== "undefined" && !navigator.onLine) {
       return Promise.reject(error);
     }
 
@@ -163,6 +193,16 @@ api.interceptors.response.use(
 
 export async function loginRequest(email, password) {
   const { data } = await api.post("/auth/login", { email, password });
+  return unwrap(data);
+}
+
+export async function staffLoginRequest(phone, pin) {
+  const { data } = await api.post("/auth/staff-login", { phone, pin });
+  return unwrap(data);
+}
+
+export async function getAuthSession() {
+  const { data } = await api.get("/auth/session");
   return unwrap(data);
 }
 
@@ -204,7 +244,30 @@ export async function postInventoryCountSessionEvent(body) {
 }
 
 export async function postTransaction(payload) {
+  if (_ufecFinancialApiDepth === 0 && import.meta.env.DEV) {
+    console.warn("[UFEC_VIOLATION]", "Direct financial call bypass detected: postTransaction");
+  }
   const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
+  return unwrap(data);
+}
+
+export async function getTransactions() {
+  const { data } = await api.get("/transactions");
+  return unwrap(data);
+}
+
+/** Server truth: `transaction.id` matches `client_transaction_id` for synced sales (recovery / support). */
+export async function getTransactionByClientId(clientTransactionId) {
+  const { data } = await api.get(`/transactions/${encodeURIComponent(clientTransactionId)}`);
+  return unwrap(data);
+}
+
+/** Manager/admin: return of a paid sale (idempotent client_return_id; optional items for partial qty). */
+export async function postTransactionReturn(body) {
+  if (_ufecFinancialApiDepth === 0 && import.meta.env.DEV) {
+    console.warn("[UFEC_VIOLATION]", "Direct financial call bypass detected: postTransactionReturn");
+  }
+  const { data } = await api.post("/transactions/return", body, { timeout: 60_000 });
   return unwrap(data);
 }
 
@@ -222,8 +285,14 @@ export async function getDashboardStats() {
   return unwrap(data);
 }
 
+/** Daily Profit Engine — same data as dashboard-stats (net subtotals, COGS, gross & net profit). */
+export async function getAnalyticsDailySummary() {
+  const { data } = await api.get("/analytics/daily-summary");
+  return unwrap(data);
+}
+
 export async function getSettings() {
-  const { data } = await api.get("/settings");
+  const { data } = await api.get("/settings", { skipGlobalToast: true });
   return unwrap(data);
 }
 
@@ -326,6 +395,12 @@ export async function getAdminOperationalErrors(params) {
 
 export async function getAdminMonitoringAlerts() {
   const { data } = await api.get("/api/admin/monitoring-alerts");
+  return unwrap(data);
+}
+
+/** Phase 7 — control tower: operational mode, resilience snapshot, anomalies, reconciliation backlog. */
+export async function getAdminUfecHealth() {
+  const { data } = await api.get("/api/admin/ufec-health");
   return unwrap(data);
 }
 
@@ -484,7 +559,7 @@ export async function getUsageSummary() {
 
 /** Phase 7.5: resolved feature flags for current plan + A/B bucket. */
 export async function getUsageFeatures() {
-  const { data } = await api.get("/usage/features");
+  const { data } = await api.get("/usage/features", { skipGlobalToast: true });
   return unwrap(data);
 }
 
@@ -540,6 +615,12 @@ export async function downloadBillingPaymentsCsv() {
 
 export async function getAuditLogs() {
   const { data } = await api.get("/audit-logs");
+  return unwrap(data);
+}
+
+/** Append-only audit ledger ingest (batch). Actor is server-trusted from JWT. */
+export async function postAuditEventsBulk(payload) {
+  const { data } = await api.post("/audit-events/bulk", payload, { skipGlobalToast: true });
   return unwrap(data);
 }
 
@@ -600,6 +681,21 @@ export async function postStaff(payload) {
   return unwrap(data);
 }
 
+export async function postStaffWhatsAppInvite(payload) {
+  const { data } = await api.post("/staff/invite", payload);
+  return unwrap(data);
+}
+
+export async function getStaffInvitePreview(token) {
+  const { data } = await api.get(`/staff/invite/${encodeURIComponent(token)}`);
+  return unwrap(data);
+}
+
+export async function postAcceptStaffInvite(body) {
+  const { data } = await api.post("/staff/accept-invite", body);
+  return unwrap(data);
+}
+
 export async function disableStaff(id) {
   const { data } = await api.post(`/staff/${id}/disable`);
   return unwrap(data);
@@ -607,6 +703,42 @@ export async function disableStaff(id) {
 
 export async function reactivateStaff(id, payload) {
   const { data } = await api.post(`/staff/${id}/reactivate`, payload);
+  return unwrap(data);
+}
+
+/** Phase 6 admin — financial observability (integrity pipeline). */
+export async function getObservabilitySummary() {
+  const { data } = await api.get("/api/v1/obs/summary");
+  return unwrap(data);
+}
+
+export async function getObservabilityHealth() {
+  const { data } = await api.get("/api/v1/obs/health");
+  return unwrap(data);
+}
+
+export async function getObservabilityAnomalies({ limit, deep } = {}) {
+  const { data } = await api.get("/api/v1/obs/anomalies", {
+    params: { limit, deep: deep ? "1" : undefined },
+  });
+  return unwrap(data);
+}
+
+export async function getObservabilityExplain(clientTransactionId) {
+  const { data } = await api.get(
+    `/api/v1/obs/transactions/${encodeURIComponent(clientTransactionId)}`
+  );
+  return unwrap(data);
+}
+
+/** Phase 6.5 — in-process financial event stream (recent ring buffer). */
+export async function getStreamRecent(params = {}) {
+  const { data } = await api.get("/api/v1/stream/recent", { params });
+  return unwrap(data);
+}
+
+export async function getStreamStats() {
+  const { data } = await api.get("/api/v1/stream/stats");
   return unwrap(data);
 }
 

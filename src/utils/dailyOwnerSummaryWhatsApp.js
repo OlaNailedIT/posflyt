@@ -8,7 +8,11 @@ import { digitsForWhatsApp } from "./whatsappReceipt";
  */
 export function formatOwnerDailySummaryMessage(summary, currencySymbol) {
   const salesLine = formatMoney(summary.totalSales ?? 0, currencySymbol);
-  return `📊 Today:\nSales: ${salesLine}\nTransactions: ${summary.transactions ?? 0}\nTop item: ${summary.topItemName ?? "None"}`;
+  const cogsLine = formatMoney(summary.cogs ?? 0, currencySymbol);
+  const gpLine = formatMoney(summary.grossProfit ?? 0, currencySymbol);
+  const expLine = formatMoney(summary.totalExpenses ?? 0, currencySymbol);
+  const netLine = formatMoney(summary.netProfit ?? 0, currencySymbol);
+  return `📊 Today:\nSales (net): ${salesLine}\nCOGS: ${cogsLine}\nGross profit: ${gpLine}\nExpenses: ${expLine}\nNet profit: ${netLine}\nTransactions: ${summary.transactions ?? 0}\nTop item: ${summary.topItemName ?? "None"}`;
 }
 
 /** @returns {string | null} */

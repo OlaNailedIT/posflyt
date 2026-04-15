@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getUsageFeatures, postTransaction } from "../services/api";
+import { getUsageFeatures } from "../services/api";
+import { createSaleFinancialEvent, executeFinancialEvent } from "../financial/executeFinancialEvent";
 import { SYNC_STATUS } from "../constants/syncStatus";
 import {
   enqueueOutbox,
-  enqueueTransaction,
   getQueuedTransactions,
   resolveSyncStatus,
   upsertCustomerInCache,
@@ -17,6 +17,43 @@ import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useToastStore } from "../stores/toastStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatMoney, roundCurrency } from "../utils/currency";
+import { useCustomers } from "../hooks/useCustomers";
+import ReceiptModal from "../components/pos/ReceiptModal";
+import { calculateTaxTotal } from "../domain/tax";
+import {
+  buildPayloadFromPosSnapshot,
+  capturePosCheckoutSnapshot,
+  CHECKOUT_INTENT_PLACEHOLDER_EVENT_ID,
+  CHECKOUT_INTENT_PLACEHOLDER_TX_ID,
+} from "../domain/checkoutSnapshot";
+import { intentFingerprintFromSnapshot } from "../domain/checkoutIntent";
+import { reconcileTransactionWithBackoff } from "../domain/checkoutReconcile";
+import {
+  firstAcceptedTransactionResult,
+  normalizeTransactionBulkResponse,
+  receiptFromAcceptedResult,
+} from "../domain/checkoutResponse";
+import { attachPayloadHash } from "../utils/payloadHash";
+import { useCheckoutSessionStore } from "../stores/checkoutSessionStore";
+import {
+  checkoutPrimaryActionLabel,
+  checkoutSessionBlocksAction,
+  checkoutShowWorkingLabel,
+} from "../domain/checkoutUiState";
+import {
+  MANUAL_CHECK_NETWORK_ERROR,
+  useCheckoutRecoveryUi,
+} from "../hooks/useCheckoutRecoveryUi";
+import { isRecoverableNetworkError } from "../utils/networkError";
+import { usePendingCheckoutStore } from "../stores/pendingCheckoutStore";
+import TransactionStatePanel from "../components/pos/TransactionStatePanel";
+import CheckoutAmbiguitySupport from "../components/pos/CheckoutAmbiguitySupport";
+import { explainSyncError } from "../utils/syncErrorMessages";
+import { enqueueTx } from "../offline/queueStore";
+import { recordSaleAppliedIntegrity, recordSaleQueuedOfflineIntegrity } from "../ledger";
+import { useAuthStore } from "../stores/authStore";
+import { createCorrelationId } from "../audit/auditCorrelation";
+import { auditSaleCreated } from "../audit/auditCalls";
 
 function unitLabel(unitType) {
   const u = unitType || "unit";
@@ -31,12 +68,6 @@ function formatShelfPrice(p, symbol) {
   const rate = p.pricePerUnit ?? p.price;
   return `${formatMoney(rate, symbol)}/${u === "kg" ? "kg" : "L"}`;
 }
-import { useCustomers } from "../hooks/useCustomers";
-import ReceiptModal from "../components/pos/ReceiptModal";
-import { calculateTaxTotal } from "../domain/tax";
-import { buildCheckoutPayload } from "../domain/posCheckout";
-import { isRecoverableNetworkError } from "../utils/networkError";
-import { explainSyncError } from "../utils/syncErrorMessages";
 
 const SPLIT_METHOD_OPTIONS = [
   { value: "CASH", label: "Cash" },
@@ -78,7 +109,6 @@ function TxSyncBadge({ row }) {
 export default function PosPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [quickCustomer, setQuickCustomer] = useState({ name: "", phone: "", email: "" });
@@ -107,6 +137,10 @@ export default function PosPage() {
     staleTime: 60_000,
   });
   const creditFeatureOn = Boolean(usageFeatures?.flags?.CREDIT_SALES);
+  const role = useAuthStore((s) => s.user?.role);
+  const showAdvancedPaymentOptions = role === "ADMIN" || role === "MANAGER";
+  const cashierFastUi = role === "CASHIER";
+  const searchInputRef = useRef(null);
 
   const [measureModal, setMeasureModal] = useState(null);
 
@@ -128,6 +162,11 @@ export default function PosPage() {
   const removeFromCart = useCartStore((s) => s.removeFromCart);
   const setQuantity = useCartStore((s) => s.setQuantity);
   const clearCart = useCartStore((s) => s.clearCart);
+  const checkoutBusy = useCartStore((s) => s.checkoutLock);
+  const checkoutSessionStatus = useCheckoutSessionStore((s) => s.status);
+  const checkoutSessionId = useCheckoutSessionStore((s) => s.sessionId);
+  const sessionBlocksCheckout = checkoutSessionBlocksAction(checkoutSessionStatus);
+  const checkoutWorkingLabel = checkoutShowWorkingLabel(checkoutSessionStatus, checkoutBusy);
   const getTotal = useCartStore((s) => s.getTotal);
   const settings = useSettingsStore((s) => s.settings);
 
@@ -145,7 +184,32 @@ export default function PosPage() {
   const { rate: taxRate, taxAmount } = calculateTaxTotal(subtotal, settings);
   const total = subtotal + taxAmount;
 
-  const onCheckout = async () => {
+  const onRecoverFromServer = useCallback(
+    (tx) => {
+      void tx;
+      const sid = useCheckoutSessionStore.getState().sessionId;
+      useCheckoutSessionStore.getState().clearSession();
+      useCartStore.getState().clearCart();
+      setCreditSaleEnabled(false);
+      setCreditOption("full");
+      setPartialAmountInput("");
+      setDueDateInput("");
+      setSplitPaymentEnabled(false);
+      setSplitLines([
+        { type: "CASH", amount: "" },
+        { type: "TRANSFER", amount: "" },
+      ]);
+      showToast("Sale completed.", "success");
+      if (sid) usePendingCheckoutStore.getState().markSuccess(sid);
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+    [queryClient, showToast]
+  );
+
+  const { activeForChannel, escapeAvailable, checkingStatus, runManualCheck, escapeHatch } =
+    useCheckoutRecoveryUi({ channel: "pos", onRecover: onRecoverFromServer });
+
+  const onCheckout = () => {
     if (!items.length) return;
     const useCredit = creditFeatureOn && creditSaleEnabled;
     if (useCredit && splitPaymentEnabled) {
@@ -177,194 +241,423 @@ export default function PosPage() {
         return;
       }
     }
-    const clientTransactionId = crypto.randomUUID();
-    const syncEventId = crypto.randomUUID();
-    let splitPayments;
-    if (splitPaymentEnabled && !useCredit) {
-      splitPayments = splitLines
-        .map((l) => ({ type: l.type, amount: roundCurrency(Number(l.amount)) }))
-        .filter((l) => l.amount > 0);
-    }
+    if (!useCartStore.getState().beginCheckout()) return;
 
-    const payload = buildCheckoutPayload({
+    const tempSnap = capturePosCheckoutSnapshot({
+      clientTransactionId: CHECKOUT_INTENT_PLACEHOLDER_TX_ID,
+      eventId: CHECKOUT_INTENT_PLACEHOLDER_EVENT_ID,
       items,
       total,
-      clientTransactionId,
-      customerId: selectedCustomerId,
-      createdAt: new Date().toISOString(),
-      creditMode: useCredit,
-      creditOption: useCredit ? creditOption : "full",
-      amountPaid: useCredit && creditOption === "partial" ? Number(partialAmountInput) : undefined,
-      dueDate: useCredit && creditOption === "credit" ? dueDateInput : undefined,
-      eventId: syncEventId,
-      splitPayments,
+      selectedCustomerId,
+      useCredit,
+      creditOption,
+      partialAmountInput,
+      dueDateInput,
+      splitPaymentEnabled,
+      splitLines,
     });
+    const intentFp = intentFingerprintFromSnapshot(tempSnap);
+    const { sessionId, eventId } = useCheckoutSessionStore.getState().allocateSession("pos", intentFp);
 
-    setLoading(true);
-    try {
-      if (isOnline) {
-        try {
-          const response = await postTransaction(payload);
-          const first = response.results?.[0];
-          if (first?.status === "failed") {
-            const messageByCode = {
-              DUPLICATE_ID: "This sale was already recorded.",
-              INSUFFICIENT_STOCK: "Sale not saved: insufficient stock for this cart.",
-              INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
-              VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
-              TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
-              FEATURE_DISABLED: "Credit feature is disabled.",
-              EXCEEDS_OUTSTANDING: "Amount exceeds outstanding balance.",
-              ALREADY_SETTLED: "This transaction is already fully paid.",
-              INVALID_PAYMENT_AMOUNT: "Invalid payment amount.",
-              INCONSISTENT_PAYMENT_STATE: "Payment totals could not be reconciled. Please retry.",
-              NO_OUTSTANDING_BALANCE: "No outstanding balance to apply this payment to.",
-              PAYMENT_SPLIT_MISMATCH: "Split payment amounts must add up to the sale total.",
-              INVALID_ITEM_QUANTITY: "Enter a valid quantity (whole units for countable items, decimals for kg or litres).",
-            };
-            throw new Error(messageByCode[first.code] || first.message || "Checkout failed.");
-          }
-          const created = response.results?.find((r) => r.status === "created");
-          if (created?.receipt) setReceipt(created.receipt);
-          queryClient.invalidateQueries({ queryKey: ["products"] });
+    const snapshot = capturePosCheckoutSnapshot({
+      clientTransactionId: sessionId,
+      eventId,
+      items,
+      total,
+      selectedCustomerId,
+      useCredit,
+      creditOption,
+      partialAmountInput,
+      dueDateInput,
+      splitPaymentEnabled,
+      splitLines,
+    });
+    const rawPayload = buildPayloadFromPosSnapshot(snapshot);
+    const txId = snapshot.clientTransactionId;
+    const correlationId = snapshot.eventId;
+
+    usePendingCheckoutStore.getState().register(txId, "pos");
+
+    const finalizePosSuccessUI = () => {
+      useCheckoutSessionStore.getState().clearSession();
+      clearCart();
+      setCreditSaleEnabled(false);
+      setCreditOption("full");
+      setPartialAmountInput("");
+      setDueDateInput("");
+      setSplitPaymentEnabled(false);
+      setSplitLines([
+        { type: "CASH", amount: "" },
+        { type: "TRANSFER", amount: "" },
+      ]);
+    };
+
+    void (async () => {
+      const markOk = () => usePendingCheckoutStore.getState().markSuccess(txId);
+      const markBad = () => usePendingCheckoutStore.getState().markFailed(txId);
+      const markQ = () => usePendingCheckoutStore.getState().markQueued(txId, "pos");
+
+      const manualVerifyToast = () => {
+        showToast(
+          "We couldn't confirm this transaction. Please check transaction history or recent sales before trying again.",
+          "info"
+        );
+        markBad();
+      };
+
+      const runReconcile = async () => {
+        useCheckoutSessionStore.getState().setStatus("verifying");
+        const row = await reconcileTransactionWithBackoff(txId);
+        if (row) {
+          finalizePosSuccessUI();
           showToast("Sale completed.", "success");
-          clearCart();
-          setCreditSaleEnabled(false);
-          setCreditOption("full");
-          setPartialAmountInput("");
-          setDueDateInput("");
-          setSplitPaymentEnabled(false);
-          setSplitLines([
-            { type: "CASH", amount: "" },
-            { type: "TRANSFER", amount: "" },
-          ]);
-        } catch (error) {
-          if (isRecoverableNetworkError(error)) {
-            await enqueueTransaction(payload);
+          markOk();
+          queryClient.invalidateQueries({ queryKey: ["products"] });
+          void recordSaleAppliedIntegrity({
+            transactionId: txId,
+            totalAmount: total,
+            source: "reconcile",
+            serverTransactionId: row.id ?? null,
+          }).catch(() => {});
+          void auditSaleCreated({
+            transactionId: row.id,
+            clientTransactionId: txId,
+            total,
+            channel: "pos",
+            duplicate: false,
+            offlineQueued: false,
+            correlationId,
+          });
+          return true;
+        }
+        useCheckoutSessionStore.getState().markManualVerificationRequired();
+        return false;
+      };
+
+      try {
+        const payload = await attachPayloadHash(
+          /** @type {Record<string, unknown>} */ (rawPayload)
+        );
+        const saleEvent = createSaleFinancialEvent({
+          clientEventId: payload.client_transaction_id,
+          payload,
+        });
+        const raw = await executeFinancialEvent(saleEvent);
+        let response;
+        try {
+          response = normalizeTransactionBulkResponse(raw);
+        } catch {
+          const ok = await runReconcile();
+          if (ok) return;
+          manualVerifyToast();
+          return;
+        }
+
+        const first = response.results?.[0];
+        if (first?.status === "failed") {
+          const messageByCode = {
+            INSUFFICIENT_STOCK: "Sale not saved: insufficient stock for this cart.",
+            INVENTORY_CONFLICT: "Sale not saved: stock is no longer available.",
+            VALIDATION_FAILED: "Sale data is invalid. Please retry checkout.",
+            TRANSIENT_SYNC_FAILURE: "Temporary sync issue. Please try again in a moment.",
+            FEATURE_DISABLED: "Credit feature is disabled.",
+            EXCEEDS_OUTSTANDING: "Amount exceeds outstanding balance.",
+            ALREADY_SETTLED: "This transaction is already fully paid.",
+            INVALID_PAYMENT_AMOUNT: "Invalid payment amount.",
+            INCONSISTENT_PAYMENT_STATE: "Payment totals could not be reconciled. Please retry.",
+            NO_OUTSTANDING_BALANCE: "No outstanding balance to apply this payment to.",
+            PAYMENT_SPLIT_MISMATCH: "Split payment amounts must add up to the sale total.",
+            INVALID_ITEM_QUANTITY:
+              "Enter a valid quantity (whole units for countable items, decimals for kg or litres).",
+            CLIENT_TOTAL_MISMATCH: "Sale total mismatch. Refresh and try checkout again.",
+            IDEMPOTENCY_PAYLOAD_MISMATCH:
+              "Transaction details changed since checkout started. Please review the cart and try again.",
+          };
+          showToast(messageByCode[first.code] || first.message || "Checkout failed.", "error");
+          useCheckoutSessionStore.getState().clearSession();
+          markBad();
+          return;
+        }
+        const accepted = firstAcceptedTransactionResult(response);
+        if (accepted) {
+          const receiptPayload = receiptFromAcceptedResult(accepted);
+          if (receiptPayload) setReceipt(receiptPayload);
+          queryClient.invalidateQueries({ queryKey: ["products"] });
+          showToast(
+            accepted.status === "duplicate" ? "Sale already recorded (no duplicate charge)." : "Sale completed.",
+            "success"
+          );
+          markOk();
+          finalizePosSuccessUI();
+          void recordSaleAppliedIntegrity({
+            transactionId: txId,
+            totalAmount: total,
+            source: "checkout",
+            duplicate: accepted.status === "duplicate",
+            serverTransactionId: accepted.transactionId ?? null,
+          }).catch(() => {});
+          void auditSaleCreated({
+            transactionId: accepted.transactionId ?? undefined,
+            clientTransactionId: txId,
+            total,
+            channel: "pos",
+            duplicate: accepted.status === "duplicate",
+            offlineQueued: false,
+            correlationId,
+          });
+          return;
+        }
+        const okAmb = await runReconcile();
+        if (okAmb) return;
+        manualVerifyToast();
+      } catch (error) {
+        if (isRecoverableNetworkError(error)) {
+          try {
+            const payload = await attachPayloadHash(
+              /** @type {Record<string, unknown>} */ (rawPayload)
+            );
+            await enqueueTx({ payload });
+            void recordSaleQueuedOfflineIntegrity({
+              transactionId: txId,
+              totalAmount: total,
+              payloadHash: payload.payload_hash ?? null,
+            }).catch(() => {});
+            markQ();
             await refreshCount();
             await loadLocalQueue();
-            showToast(
-              "Connection unstable. Sale saved locally and will sync when the network is available.",
-              "success"
-            );
-            clearCart();
-            setSplitPaymentEnabled(false);
-            setSplitLines([
-              { type: "CASH", amount: "" },
-              { type: "TRANSFER", amount: "" },
-            ]);
-          } else {
-            showToast(error.message || "Checkout failed. Try again.", "error");
+            finalizePosSuccessUI();
+            showToast("Sale saved offline (will sync automatically).", "success");
+            void auditSaleCreated({
+              clientTransactionId: txId,
+              total,
+              channel: "pos",
+              offlineQueued: true,
+              correlationId,
+            });
+          } catch {
+            showToast("Could not save sale locally. Try again.", "error");
+            markBad();
           }
+        } else {
+          const ok = await runReconcile();
+          if (ok) return;
+          manualVerifyToast();
         }
-      } else {
-        await enqueueTransaction(payload);
-        await refreshCount();
-        await loadLocalQueue();
-        showToast("Saved offline. Will sync when you are back online.", "success");
-        clearCart();
+      } finally {
+        useCartStore.getState().endCheckout();
+      }
+    })();
+  };
+
+  useEffect(() => {
+    const s = useCheckoutSessionStore.getState();
+    if (s.channel !== "pos" || !s.sessionId) return;
+    if (s.status !== "verifying" && s.status !== "manual_verification_required") return;
+    let cancelled = false;
+    const sid = s.sessionId;
+    const reconcileCorrelationId = useCheckoutSessionStore.getState().eventId ?? createCorrelationId();
+    void (async () => {
+      useCheckoutSessionStore.getState().setStatus("verifying");
+      const row = await reconcileTransactionWithBackoff(sid);
+      if (cancelled) return;
+      if (row) {
+        useCheckoutSessionStore.getState().clearSession();
+        useCartStore.getState().clearCart();
+        setCreditSaleEnabled(false);
+        setCreditOption("full");
+        setPartialAmountInput("");
+        setDueDateInput("");
         setSplitPaymentEnabled(false);
         setSplitLines([
           { type: "CASH", amount: "" },
           { type: "TRANSFER", amount: "" },
         ]);
+        showToast("Sale completed.", "success");
+        usePendingCheckoutStore.getState().markSuccess(sid);
+        queryClient.invalidateQueries({ queryKey: ["products"] });
+        void recordSaleAppliedIntegrity({
+          transactionId: sid,
+          totalAmount: Number(row.totalAmount ?? row.total ?? 0),
+          source: "reconcile",
+          serverTransactionId: row.id ?? null,
+        }).catch(() => {});
+        void auditSaleCreated({
+          transactionId: row.id,
+          clientTransactionId: sid,
+          total: Number(row.totalAmount ?? row.total ?? 0),
+          channel: "pos",
+          duplicate: false,
+          offlineQueued: false,
+          correlationId: reconcileCorrelationId,
+        });
+      } else {
+        useCheckoutSessionStore.getState().markManualVerificationRequired();
+        usePendingCheckoutStore.getState().markFailed(sid);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cashierFastUi) return;
+    const id = window.setTimeout(() => searchInputRef.current?.focus(), 120);
+    return () => window.clearTimeout(id);
+  }, [cashierFastUi]);
+
+  const queueList = (
+    <ul className="mt-3 space-y-2">
+      {localQueue.map((tx) => (
+        <li
+          key={tx.id}
+          className="flex flex-col gap-1 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-mono text-xs text-stone-500 dark:text-stone-400">
+                {(tx.client_transaction_id || tx.id).slice(0, 8)}…
+              </p>
+              <p className="text-sm text-stone-800 dark:text-stone-200">
+                {formatMoney(Number(tx.payload?.total ?? 0), settings.currencySymbol)}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <TxSyncBadge row={tx} />
+              {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+                <button
+                  type="button"
+                  className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 dark:border-red-700 dark:bg-stone-900 dark:text-red-200"
+                  onClick={() =>
+                    void syncSingleTransaction(tx).then(() => {
+                      void loadLocalQueue();
+                    })
+                  }
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          </div>
+          {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              {explainSyncError(tx.lastErrorCode || tx.syncError || tx.lastError)}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+
+  const productRowClass = cashierFastUi
+    ? `flex min-h-[3.75rem] items-center justify-between ${lineItem} p-4 text-left text-lg font-medium transition hover:border-teal-300 hover:bg-teal-50 active:scale-[0.99] dark:hover:border-teal-700 dark:hover:bg-stone-800`
+    : `flex min-h-14 items-center justify-between ${lineItem} p-3 text-left text-base transition hover:border-teal-300 hover:bg-teal-50 dark:hover:border-teal-700 dark:hover:bg-stone-800`;
+
+  const checkoutDisabled = !items.length || checkoutBusy || sessionBlocksCheckout;
+  const checkoutLabel = checkoutWorkingLabel
+    ? checkoutPrimaryActionLabel(checkoutSessionStatus, "Processing…")
+    : "Checkout";
 
   return (
-    <section>
-      <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">POS</h1>
-      <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-        How to use: add products to cart, select customer if needed, then tap Checkout.
-      </p>
-      <p className="mt-1 text-sm font-semibold text-teal-700 dark:text-teal-400">
-        Works even when your internet is down.
-      </p>
-      {usageFeatures?.flags?.QUICK_SALES_MODE !== false && (
-        <div className="mt-3">
-          <Link
-            to="/pos/quick"
-            className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-teal-700 dark:bg-teal-500 dark:text-stone-950"
-          >
-            Quick sale mode — one screen
-          </Link>
+    <section className={cashierFastUi ? "pb-28 lg:pb-0" : undefined}>
+      {cashierFastUi ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-black tracking-tight text-stone-900 dark:text-stone-100">POS</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            {!isOnline && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+                Offline
+              </span>
+            )}
+            {usageFeatures?.flags?.QUICK_SALES_MODE !== false && (
+              <Link
+                to="/pos/quick"
+                className="rounded-full border-2 border-teal-600 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-900 dark:border-teal-500 dark:bg-teal-950/40 dark:text-teal-200"
+              >
+                Quick
+              </Link>
+            )}
+          </div>
         </div>
+      ) : (
+        <>
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">POS</h1>
+          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+            How to use: add products to cart, select customer if needed, then tap Checkout.
+          </p>
+          <p className="mt-1 text-sm font-semibold text-teal-700 dark:text-teal-400">
+            Works even when your internet is down.
+          </p>
+          {usageFeatures?.flags?.QUICK_SALES_MODE !== false && (
+            <div className="mt-3">
+              <Link
+                to="/pos/quick"
+                className="inline-flex items-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-teal-700 dark:bg-teal-500 dark:text-stone-950"
+              >
+                Quick sale mode — one screen
+              </Link>
+            </div>
+          )}
+          {!isOnline && (
+            <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+              Offline mode active. Sales are saved locally and will sync when internet returns.
+            </p>
+          )}
+          {(pendingTransactions > 0 || failedTransactions > 0) && (
+            <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+              Queue: {pendingTransactions} active, {failedTransactions} failed.{" "}
+              <Link to="/settings" className="underline">
+                Open Sync Controls
+              </Link>
+            </p>
+          )}
+        </>
       )}
-      {!isOnline && (
-        <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
-          Offline mode active. Sales are saved locally and will sync when internet returns.
-        </p>
-      )}
-      {(pendingTransactions > 0 || failedTransactions > 0) && (
-        <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
-          Queue: {pendingTransactions} active, {failedTransactions} failed.{" "}
-          <Link to="/settings" className="underline">
-            Open Sync Controls
+
+      {cashierFastUi && (pendingTransactions > 0 || failedTransactions > 0) && (
+        <p className="mb-3 text-xs font-medium text-amber-800 dark:text-amber-300">
+          Queue: {pendingTransactions} waiting · {failedTransactions} need retry.{" "}
+          <Link to="/settings" className="font-semibold underline">
+            Sync
           </Link>
         </p>
       )}
 
-      {localQueue.length > 0 && (
-        <div className={`${card} mt-4`}>
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
-            Local sale queue
-          </h2>
-          <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            Status for each sale saved on this device (including synced copies kept for visibility).
-          </p>
-          <ul className="mt-3 space-y-2">
-            {localQueue.map((tx) => (
-              <li
-                key={tx.id}
-                className="flex flex-col gap-1 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-mono text-xs text-stone-500 dark:text-stone-400">
-                      {(tx.client_transaction_id || tx.id).slice(0, 8)}…
-                    </p>
-                    <p className="text-sm text-stone-800 dark:text-stone-200">
-                      {formatMoney(Number(tx.payload?.total ?? 0), settings.currencySymbol)}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <TxSyncBadge row={tx} />
-                    {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
-                      <button
-                        type="button"
-                        className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 dark:border-red-700 dark:bg-stone-900 dark:text-red-200"
-                        onClick={() =>
-                          void syncSingleTransaction(tx).then(() => {
-                            void loadLocalQueue();
-                          })
-                        }
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {resolveSyncStatus(tx) === SYNC_STATUS.FAILED && (
-                  <p className="text-xs text-red-700 dark:text-red-300">
-                    {explainSyncError(tx.lastErrorCode || tx.syncError || tx.lastError)}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {localQueue.length > 0 &&
+        (cashierFastUi ? (
+          <details className={`${card} mt-4`}>
+            <summary className="cursor-pointer text-base font-semibold text-stone-900 marker:text-teal-600 dark:text-stone-100">
+              Sales on this device ({localQueue.length})
+            </summary>
+            <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+              Tap a failed sale to retry from Settings if needed.
+            </p>
+            {queueList}
+          </details>
+        ) : (
+          <div className={`${card} mt-4`}>
+            <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Local sale queue</h2>
+            <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+              Status for each sale saved on this device (including synced copies kept for visibility).
+            </p>
+            {queueList}
+          </div>
+        ))}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div className={card}>
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search products..."
-            className={input}
+            className={
+              cashierFastUi
+                ? `${input} py-3 text-lg placeholder:text-stone-400`
+                : input
+            }
+            autoComplete="off"
+            enterKeyHint="search"
           />
           {isLoading && (
             <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">Loading products...</p>
@@ -396,7 +689,7 @@ export default function PosPage() {
                       addToCart(p);
                     }
                   }}
-                  className={`flex min-h-14 items-center justify-between ${lineItem} p-3 text-left text-base transition hover:border-teal-300 hover:bg-teal-50 dark:hover:border-teal-700 dark:hover:bg-stone-800`}
+                  className={productRowClass}
                 >
                   <span>{p.name}</span>
                   <span className="font-semibold text-teal-800 dark:text-teal-400">
@@ -410,6 +703,9 @@ export default function PosPage() {
 
         <div className={card}>
           <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Cart</h2>
+          <div className="mt-3">
+            <TransactionStatePanel />
+          </div>
           <div className="mt-3 space-y-2 rounded-lg border border-stone-200 p-2.5 dark:border-stone-700">
             <label className="text-sm">Customer (optional)</label>
             <select
@@ -425,6 +721,7 @@ export default function PosPage() {
               ))}
             </select>
             {creditFeatureOn &&
+              showAdvancedPaymentOptions &&
               selectedCustomer &&
               Number(selectedCustomer.totalOutstanding || 0) > 0 && (
                 <div className="mt-2 rounded bg-yellow-100 p-2 text-sm text-yellow-900 dark:bg-yellow-950/40 dark:text-yellow-100">
@@ -564,6 +861,7 @@ export default function PosPage() {
             </span>
           </div>
 
+          {showAdvancedPaymentOptions ? (
           <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-950">
             <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
               <input
@@ -626,8 +924,9 @@ export default function PosPage() {
               </div>
             )}
           </div>
+          ) : null}
 
-          {creditFeatureOn && (
+          {creditFeatureOn && showAdvancedPaymentOptions && (
             <div className="mt-4 rounded-lg border border-stone-200 bg-stone-50 p-3 dark:border-stone-600 dark:bg-stone-950">
               <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-stone-800 dark:text-stone-200">
                 <input
@@ -717,11 +1016,62 @@ export default function PosPage() {
           <button
             type="button"
             onClick={onCheckout}
-            disabled={!items.length || loading}
-            className="mt-3 w-full rounded-lg bg-teal-600 py-3 text-lg font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-40 dark:bg-teal-500 dark:text-stone-950 dark:hover:bg-teal-400"
+            disabled={checkoutDisabled}
+            className={`mt-3 w-full rounded-lg bg-teal-600 py-3 text-lg font-semibold text-white shadow-sm hover:bg-teal-700 disabled:opacity-40 dark:bg-teal-500 dark:text-stone-950 dark:hover:bg-teal-400 ${cashierFastUi ? "hidden lg:block lg:py-4 lg:text-xl lg:font-black" : ""}`}
           >
-            {loading ? "Processing..." : "Checkout"}
+            {checkoutLabel}
           </button>
+          {(checkoutSessionStatus === "manual_verification_required" ||
+            checkoutSessionStatus === "verifying") && (
+            <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+              {checkoutSessionStatus === "verifying"
+                ? "Confirming sale with the server…"
+                : "We couldn't confirm this sale. Check recent transactions before paying again with the same cart."}
+            </p>
+          )}
+          {activeForChannel && (
+            <div className="mt-2 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={checkingStatus}
+                onClick={async () => {
+                  const result = await runManualCheck();
+                  if (result === MANUAL_CHECK_NETWORK_ERROR) {
+                    showToast("Could not reach the server. Try again shortly.", "error");
+                    return;
+                  }
+                  if (!result) {
+                    showToast(
+                      "No matching sale found yet. Wait a moment or confirm in your sales history.",
+                      "info"
+                    );
+                  }
+                }}
+                className="rounded-lg border border-stone-300 bg-stone-100 px-3 py-2 text-sm font-medium text-stone-800 hover:bg-stone-200 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
+              >
+                {checkingStatus ? "Checking…" : "Check transaction status"}
+              </button>
+              {escapeAvailable && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    showToast(
+                      "Starting fresh. If a payment might have gone through, confirm in your sales history before charging again.",
+                      "info"
+                    );
+                    escapeHatch();
+                  }}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                >
+                  Start new checkout
+                </button>
+              )}
+            </div>
+          )}
+          <CheckoutAmbiguitySupport
+            visible={checkoutSessionStatus === "manual_verification_required" && activeForChannel}
+            sessionId={checkoutSessionId}
+          />
         </div>
       </div>
       {measureModal && (
@@ -767,7 +1117,41 @@ export default function PosPage() {
         </div>
       )}
 
-      <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />
+      {cashierFastUi && (
+        <div
+          className="fixed inset-x-0 bottom-14 z-[38] border-t-2 border-stone-200 bg-white/95 px-3 py-2 shadow-[0_-4px_24px_rgba(0,0,0,0.08)] backdrop-blur dark:border-stone-700 dark:bg-stone-900/95 lg:hidden"
+          style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+        >
+          <div className="mx-auto flex max-w-7xl items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">Total</p>
+              <p className="truncate text-xl font-black tabular-nums text-teal-800 dark:text-teal-300">
+                {formatMoney(total, settings.currencySymbol)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onCheckout}
+              disabled={checkoutDisabled}
+              className="min-h-[3.25rem] min-w-[10rem] flex-1 rounded-2xl bg-teal-600 px-4 text-lg font-black text-white shadow-lg hover:bg-teal-700 disabled:opacity-40 dark:bg-teal-500 dark:text-stone-950"
+            >
+              {checkoutLabel}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ReceiptModal
+        key={
+          receipt?.transaction?.id != null
+            ? String(receipt.transaction.id)
+            : receipt?.transactionId != null
+              ? String(receipt.transactionId)
+              : "receipt-closed"
+        }
+        receipt={receipt}
+        onClose={() => setReceipt(null)}
+      />
     </section>
   );
 }

@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useNotificationStore } from "../stores/notificationStore";
 
-/**
- * Phase 7.13.2: header alerts with one-tap navigation to inventory (low stock) or Settings sync panel.
- */
+/** Header alerts with one-tap navigation to inventory (low stock) or Settings sync panel. */
 export default function SmartAlertsBell() {
   const notifications = useNotificationStore((s) => s.notifications);
   const [open, setOpen] = useState(false);

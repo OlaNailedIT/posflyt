@@ -15,6 +15,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     () => useAuthStore.persist?.hasHydrated?.() ?? false
   );
   const tokenFromStore = useAuthStore((s) => s.token);
+  const offlineSessionActive = useAuthStore((s) => s.offlineSessionActive);
 
   useEffect(() => {
     const unsub = useAuthStore.persist.onFinishHydration(() => setReady(true));
@@ -31,7 +32,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   }
 
   const token = tokenFromStore || getStoredAuthTokenSync();
-  if (!token) {
+  if (!token && !offlineSessionActive) {
     const redirect = `${location.pathname}${location.search || ""}`;
     const qs = redirect && redirect !== "/login" ? `?redirect=${encodeURIComponent(redirect)}` : "";
     return <Navigate to={`/login${qs}`} replace />;

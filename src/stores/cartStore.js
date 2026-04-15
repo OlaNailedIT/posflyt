@@ -15,6 +15,14 @@ const calcTotal = (items) =>
 
 export const useCartStore = create((set, get) => ({
   items: [],
+  /** Ephemeral guard: one synchronous checkout per cart; blocks rapid re-entry (not button-only). */
+  checkoutLock: false,
+  beginCheckout: () => {
+    if (get().checkoutLock) return false;
+    set({ checkoutLock: true });
+    return true;
+  },
+  endCheckout: () => set({ checkoutLock: false }),
   /**
    * @param product - from API (includes unitType, pricePerUnit when set)
    * @param [opts.quantity] - for measured products; defaults to 1 (kg/litre)

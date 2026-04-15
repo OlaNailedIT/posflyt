@@ -10,16 +10,19 @@ export function useDashboardStats() {
   const fallback = {
     date: null,
     revenue: 0,
-    totalExpenses: 0,
-    dailyProfit: 0,
+    cogs: 0,
     grossProfit: 0,
+    totalExpenses: 0,
+    netProfit: 0,
+    dailyProfit: 0,
     profit: 0,
-    profitType: "gross",
+    profitType: "net",
     transactions: 0,
     lowStock: 0,
     customers: 0,
     returningCustomers: 0,
     lowStockProducts: [],
+    topSellingToday: [],
   };
 
   return useQuery({

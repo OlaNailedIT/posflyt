@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import "./index.css";
 import { useOfflineSync } from "./hooks/useOfflineSync";
+import { startOfflineSyncBootstrap } from "./offline/syncBootstrap";
+import { useUfecOperationalResilience } from "./hooks/useUfecOperationalResilience";
 import { useSettings } from "./hooks/useSettings";
 import ToastHost from "./components/ToastHost";
 import PwaUpdatePrompt from "./components/PwaUpdatePrompt";
@@ -16,6 +18,8 @@ import { AnalyticsProvider } from "./context/AnalyticsContext";
 import { bootstrapAuthSession } from "./auth/bootstrapAuthSession";
 import { useSessionRefreshTimer } from "./hooks/useSessionRefreshTimer";
 import { useAuthStore } from "./stores/authStore";
+import { usePendingCheckoutStore } from "./stores/pendingCheckoutStore";
+import { useOfflineAuthRevalidate } from "./hooks/useOfflineAuthRevalidate";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,8 +42,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 function AppBootstrap() {
   useSessionRefreshTimer();
+  useOfflineAuthRevalidate();
   useOfflineSync();
+  useUfecOperationalResilience();
   useSettings();
+  useEffect(() => {
+    const stop = startOfflineSyncBootstrap();
+    return stop;
+  }, []);
   return (
     <>
       <ThemeSync />
@@ -102,23 +112,60 @@ function AuthReadyRoot() {
   return <AppBootstrap />;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <HelmetProvider>
-          <AnalyticsProvider>
-            <RegionProvider>
-              <AuthReadyRoot />
-            </RegionProvider>
-          </AnalyticsProvider>
-        </HelmetProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+const rootEl = document.getElementById("root");
+
+async function startApp() {
+  const { runIndexedDbVersionGuard } = await import("./offline/indexedDbVersionGuard.js");
+  await runIndexedDbVersionGuard();
+
+  const root = ReactDOM.createRoot(rootEl);
+  root.render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <HelmetProvider>
+            <AnalyticsProvider>
+              <RegionProvider>
+                <AuthReadyRoot />
+              </RegionProvider>
+            </AnalyticsProvider>
+          </HelmetProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+}
+
+startApp().catch((err) => {
+  console.error(err);
+  if (!rootEl) return;
+  rootEl.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.style.cssText =
+    "min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.5rem;padding:1.5rem;text-align:center;font-family:system-ui,sans-serif;background:#fafaf9;color:#292524;";
+  const title = document.createElement("p");
+  title.style.fontWeight = "600";
+  title.textContent = "Could not start offline storage";
+  const msg = document.createElement("p");
+  msg.style.maxWidth = "28rem";
+  msg.style.fontSize = "0.875rem";
+  msg.style.color = "#57534e";
+  msg.textContent = String(err?.message || err);
+  const hint = document.createElement("p");
+  hint.style.fontSize = "0.875rem";
+  hint.textContent = "Try refreshing the page. If this continues, contact support from Help.";
+  wrap.appendChild(title);
+  wrap.appendChild(msg);
+  wrap.appendChild(hint);
+  rootEl.appendChild(wrap);
+});
 
 /** Unregister any legacy SW during dev so stale caches do not break HMR. */
 if (import.meta.env.DEV && "serviceWorker" in navigator) {
   navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
+}
+
+/** Dev: in console run `__pendingCheckout()` to inspect in-memory checkout rows. */
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  window.__pendingCheckout = () => usePendingCheckoutStore.getState();
 }

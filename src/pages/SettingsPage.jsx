@@ -169,12 +169,31 @@ export default function SettingsPage() {
   };
   const syncSummary = `POSflyt Sync Update: Pending ${pendingTransactions}, Failed ${failedTransactions}, Duplicates prevented ${reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}, Last synced ${lastSuccessfulSyncAt != null ? new Date(lastSuccessfulSyncAt).toLocaleString() : lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : "Not yet"}, Reconciliation: ${reliability?.lastReconciliationStatus || "Unknown"}.`;
 
+  const dataSafetyLine =
+    pendingTransactions === 0 && failedTransactions === 0
+      ? "All caught up — completed sales are sent to the cloud when you are online."
+      : failedTransactions > 0
+        ? `${failedTransactions} sale(s) need attention before they sync. Use Sync below.`
+        : `${pendingTransactions} sale(s) waiting to sync — they stay safely on this device until sent.`;
+
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Settings</h1>
       <p className="text-sm text-stone-600 dark:text-stone-400">
         Keep your business data consistent, stock accurate, and sync recoverable in low-internet conditions.
       </p>
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/95 p-4 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-100">
+        <h2 className="font-semibold text-emerald-900 dark:text-emerald-100">Data safety</h2>
+        <p className="mt-1">{dataSafetyLine}</p>
+        <p className="mt-2 text-xs text-emerald-800/90 dark:text-emerald-200/90">
+          Last successful sync:{" "}
+          {lastSuccessfulSyncAt != null
+            ? new Date(lastSuccessfulSyncAt).toLocaleString()
+            : lastSyncedAt
+              ? new Date(lastSyncedAt).toLocaleString()
+              : "Not yet"}
+        </p>
+      </div>
       {isLoading && <p className="text-sm text-stone-500 dark:text-stone-400">Loading settings...</p>}
       <form
         onSubmit={onSubmit}

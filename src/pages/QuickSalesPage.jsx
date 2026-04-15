@@ -1,19 +1,48 @@
-import { Link, Navigate } from "react-router-dom";
-import { useCallback, useMemo, useState } from "react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getUsageFeatures, postTransaction } from "../services/api";
-import { enqueueTransaction } from "../services/db";
+import { getUsageFeatures } from "../services/api";
+import { createSaleFinancialEvent, executeFinancialEvent } from "../financial/executeFinancialEvent";
+import { enqueueTx } from "../offline/queueStore";
+import { recordSaleAppliedIntegrity, recordSaleQueuedOfflineIntegrity } from "../ledger";
+import { createCorrelationId } from "../audit/auditCorrelation";
+import { auditSaleCreated } from "../audit/auditCalls";
 import { useCartStore } from "../stores/cartStore";
 import { useProducts } from "../hooks/useProducts";
-import { useOfflineStore } from "../stores/offlineStore";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useToastStore } from "../stores/toastStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatMoney } from "../utils/currency";
 import ReceiptModal from "../components/pos/ReceiptModal";
 import { calculateTaxTotal } from "../domain/tax";
-import { buildCheckoutPayload } from "../domain/posCheckout";
+import {
+  buildPayloadFromQuickSnapshot,
+  captureQuickCheckoutSnapshot,
+  CHECKOUT_INTENT_PLACEHOLDER_EVENT_ID,
+  CHECKOUT_INTENT_PLACEHOLDER_TX_ID,
+} from "../domain/checkoutSnapshot";
+import { intentFingerprintFromSnapshot } from "../domain/checkoutIntent";
+import { reconcileTransactionWithBackoff } from "../domain/checkoutReconcile";
+import {
+  firstAcceptedTransactionResult,
+  normalizeTransactionBulkResponse,
+  receiptFromAcceptedResult,
+} from "../domain/checkoutResponse";
+import { attachPayloadHash } from "../utils/payloadHash";
+import { useCheckoutSessionStore } from "../stores/checkoutSessionStore";
+import {
+  MANUAL_CHECK_NETWORK_ERROR,
+  useCheckoutRecoveryUi,
+} from "../hooks/useCheckoutRecoveryUi";
+import {
+  checkoutPrimaryActionLabel,
+  checkoutSessionBlocksAction,
+  checkoutShowWorkingLabel,
+} from "../domain/checkoutUiState";
 import { isRecoverableNetworkError } from "../utils/networkError";
+import { usePendingCheckoutStore } from "../stores/pendingCheckoutStore";
+import TransactionStatePanel from "../components/pos/TransactionStatePanel";
+import CheckoutAmbiguitySupport from "../components/pos/CheckoutAmbiguitySupport";
 
 function unitLabel(unitType) {
   const u = unitType || "unit";
@@ -37,6 +66,7 @@ const productTile =
   "flex min-h-[7rem] flex-col items-stretch justify-between rounded-2xl border-2 border-stone-200 bg-white p-3 text-left shadow-sm transition active:scale-[0.98] dark:border-stone-600 dark:bg-stone-900";
 
 export default function QuickSalesPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const showToast = useToastStore((s) => s.showToast);
   const { data: usageFeatures } = useQuery({
@@ -55,15 +85,18 @@ export default function QuickSalesPage() {
   const removeFromCart = useCartStore((s) => s.removeFromCart);
   const setQuantity = useCartStore((s) => s.setQuantity);
   const clearCart = useCartStore((s) => s.clearCart);
+  const checkoutBusy = useCartStore((s) => s.checkoutLock);
+  const checkoutSessionStatus = useCheckoutSessionStore((s) => s.status);
+  const checkoutSessionId = useCheckoutSessionStore((s) => s.sessionId);
+  const sessionBlocksCheckout = checkoutSessionBlocksAction(checkoutSessionStatus);
+  const checkoutWorkingLabel = checkoutShowWorkingLabel(checkoutSessionStatus, checkoutBusy);
   const getTotal = useCartStore((s) => s.getTotal);
 
   const [query, setQuery] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("CASH");
-  const [loading, setLoading] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [measureModal, setMeasureModal] = useState(null);
 
-  const isOnline = useOfflineStore((s) => s.isOnline);
   const { refreshCount } = useOfflineSync();
 
   const orderedProducts = useMemo(() => {
@@ -85,68 +118,258 @@ export default function QuickSalesPage() {
   const { rate: taxRate, taxAmount } = calculateTaxTotal(subtotal, settings);
   const total = subtotal + taxAmount;
 
-  const onPay = async () => {
+  const onRecoverFromServer = useCallback(
+    (tx) => {
+      void tx;
+      const sid = useCheckoutSessionStore.getState().sessionId;
+      useCheckoutSessionStore.getState().clearSession();
+      clearCart();
+      showToast("Sale completed.", "success");
+      if (sid) usePendingCheckoutStore.getState().markSuccess(sid);
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+    [clearCart, queryClient, showToast]
+  );
+
+  const { activeForChannel, escapeAvailable, checkingStatus, runManualCheck, escapeHatch } =
+    useCheckoutRecoveryUi({ channel: "quick", onRecover: onRecoverFromServer });
+
+  const onPay = () => {
     if (!items.length) {
       showToast("Add items to the cart first.", "error");
       return;
     }
+    if (!useCartStore.getState().beginCheckout()) return;
+
     const checkoutStarted = performance.now();
-    const clientTransactionId = crypto.randomUUID();
-    const syncEventId = crypto.randomUUID();
     const prepMs = Math.round(performance.now() - checkoutStarted);
-    const payload = buildCheckoutPayload({
+
+    const tempSnap = captureQuickCheckoutSnapshot({
+      clientTransactionId: CHECKOUT_INTENT_PLACEHOLDER_TX_ID,
+      eventId: CHECKOUT_INTENT_PLACEHOLDER_EVENT_ID,
       items,
       total,
-      clientTransactionId,
-      customerId: undefined,
-      createdAt: new Date().toISOString(),
-      creditMode: false,
-      creditOption: "full",
-      eventId: syncEventId,
-      splitPayments: undefined,
-      defaultPaymentMethod: paymentMethod,
-      checkoutSource: "quick",
+      paymentMethod,
       clientDurationMs: prepMs,
     });
+    const intentFp = intentFingerprintFromSnapshot(tempSnap);
+    const { sessionId, eventId } = useCheckoutSessionStore.getState().allocateSession("quick", intentFp);
 
-    setLoading(true);
-    try {
-      if (isOnline) {
-        try {
-          const response = await postTransaction(payload);
-          const first = response.results?.[0];
-          if (first?.status === "failed") {
-            const messageByCode = {
-              INSUFFICIENT_STOCK: "Not enough stock.",
-              INVALID_ITEM_QUANTITY: "Invalid quantity for one or more items.",
-            };
-            throw new Error(messageByCode[first.code] || first.message || "Checkout failed.");
-          }
-          const created = response.results?.find((r) => r.status === "created");
-          if (created?.receipt) setReceipt(created.receipt);
-          queryClient.invalidateQueries({ queryKey: ["products"] });
-          showToast("Sale completed.", "success");
-          clearCart();
-        } catch (error) {
-          if (isRecoverableNetworkError(error)) {
-            await enqueueTransaction(payload);
-            await refreshCount();
-            showToast("Saved offline — will sync when online.", "success");
-            clearCart();
-          } else {
-            showToast(error.message || "Checkout failed.", "error");
-          }
-        }
-      } else {
-        await enqueueTransaction(payload);
-        await refreshCount();
-        showToast("Saved offline — will sync when online.", "success");
+    const snapshot = captureQuickCheckoutSnapshot({
+      clientTransactionId: sessionId,
+      eventId,
+      items,
+      total,
+      paymentMethod,
+      clientDurationMs: prepMs,
+    });
+    const rawPayload = buildPayloadFromQuickSnapshot(snapshot);
+    const txId = snapshot.clientTransactionId;
+    const correlationId = snapshot.eventId;
+
+    usePendingCheckoutStore.getState().register(txId, "quick");
+
+    void (async () => {
+      const markOk = () => usePendingCheckoutStore.getState().markSuccess(txId);
+      const markBad = () => usePendingCheckoutStore.getState().markFailed(txId);
+      const markQ = () => usePendingCheckoutStore.getState().markQueued(txId, "quick");
+
+      const finalizeQuickSuccessUI = () => {
+        useCheckoutSessionStore.getState().clearSession();
         clearCart();
+      };
+
+      const manualVerifyToast = () => {
+        showToast(
+          "We couldn't confirm this transaction. Please check transaction history or recent sales before trying again.",
+          "info"
+        );
+        markBad();
+      };
+
+      const runReconcile = async () => {
+        useCheckoutSessionStore.getState().setStatus("verifying");
+        const row = await reconcileTransactionWithBackoff(txId);
+        if (row) {
+          finalizeQuickSuccessUI();
+          showToast("Sale completed.", "success");
+          markOk();
+          queryClient.invalidateQueries({ queryKey: ["products"] });
+          void recordSaleAppliedIntegrity({
+            transactionId: txId,
+            totalAmount: total,
+            source: "reconcile",
+            serverTransactionId: row.id ?? null,
+          }).catch(() => {});
+          void auditSaleCreated({
+            transactionId: row.id,
+            clientTransactionId: txId,
+            total,
+            channel: "quick",
+            duplicate: false,
+            offlineQueued: false,
+            correlationId,
+          });
+          return true;
+        }
+        useCheckoutSessionStore.getState().markManualVerificationRequired();
+        return false;
+      };
+
+      try {
+        const payload = await attachPayloadHash(
+          /** @type {Record<string, unknown>} */ (rawPayload)
+        );
+        const saleEvent = createSaleFinancialEvent({
+          clientEventId: payload.client_transaction_id,
+          payload,
+        });
+        const raw = await executeFinancialEvent(saleEvent);
+        let response;
+        try {
+          response = normalizeTransactionBulkResponse(raw);
+        } catch {
+          const ok = await runReconcile();
+          if (ok) return;
+          manualVerifyToast();
+          return;
+        }
+
+        const first = response.results?.[0];
+        if (first?.status === "failed") {
+          const messageByCode = {
+            INSUFFICIENT_STOCK: "Not enough stock.",
+            INVALID_ITEM_QUANTITY: "Invalid quantity for one or more items.",
+            IDEMPOTENCY_PAYLOAD_MISMATCH:
+              "Transaction details changed since checkout started. Please review the cart and try again.",
+          };
+          showToast(messageByCode[first.code] || first.message || "Checkout failed.", "error");
+          useCheckoutSessionStore.getState().clearSession();
+          markBad();
+          return;
+        }
+        const accepted = firstAcceptedTransactionResult(response);
+        if (accepted) {
+          const receiptPayload = receiptFromAcceptedResult(accepted);
+          if (receiptPayload) {
+            setReceipt(receiptPayload);
+            showToast(
+              accepted.status === "duplicate"
+                ? "Sale already recorded (no duplicate charge)."
+                : "Sale completed.",
+              "success"
+            );
+          } else if (accepted.transactionId) {
+            showToast(
+              `Sale completed. Receipt preview unavailable — ID ${String(accepted.transactionId).slice(0, 8)}…`,
+              "success"
+            );
+          } else {
+            showToast("Sale completed.", "success");
+          }
+          queryClient.invalidateQueries({ queryKey: ["products"] });
+          markOk();
+          finalizeQuickSuccessUI();
+          void recordSaleAppliedIntegrity({
+            transactionId: txId,
+            totalAmount: total,
+            source: "checkout",
+            duplicate: accepted.status === "duplicate",
+            serverTransactionId: accepted.transactionId ?? null,
+          }).catch(() => {});
+          void auditSaleCreated({
+            transactionId: accepted.transactionId ?? undefined,
+            clientTransactionId: txId,
+            total,
+            channel: "quick",
+            duplicate: accepted.status === "duplicate",
+            offlineQueued: false,
+            correlationId,
+          });
+          return;
+        }
+        const okAmb = await runReconcile();
+        if (okAmb) return;
+        manualVerifyToast();
+      } catch (error) {
+        if (isRecoverableNetworkError(error)) {
+          try {
+            const payload = await attachPayloadHash(
+              /** @type {Record<string, unknown>} */ (rawPayload)
+            );
+            await enqueueTx({ payload });
+            void recordSaleQueuedOfflineIntegrity({
+              transactionId: txId,
+              totalAmount: total,
+              payloadHash: payload.payload_hash ?? null,
+            }).catch(() => {});
+            markQ();
+            await refreshCount();
+            finalizeQuickSuccessUI();
+            showToast("Sale saved offline (will sync automatically).", "success");
+            void auditSaleCreated({
+              clientTransactionId: txId,
+              total,
+              channel: "quick",
+              offlineQueued: true,
+              correlationId,
+            });
+          } catch {
+            showToast("Could not save sale locally. Try again.", "error");
+            markBad();
+          }
+        } else {
+          const ok = await runReconcile();
+          if (ok) return;
+          manualVerifyToast();
+        }
+      } finally {
+        useCartStore.getState().endCheckout();
       }
-    } finally {
-      setLoading(false);
-    }
+    })();
   };
+
+  useEffect(() => {
+    const s = useCheckoutSessionStore.getState();
+    if (s.channel !== "quick" || !s.sessionId) return;
+    if (s.status !== "verifying" && s.status !== "manual_verification_required") return;
+    let cancelled = false;
+    const sid = s.sessionId;
+    const reconcileCorrelationId = useCheckoutSessionStore.getState().eventId ?? createCorrelationId();
+    void (async () => {
+      useCheckoutSessionStore.getState().setStatus("verifying");
+      const row = await reconcileTransactionWithBackoff(sid);
+      if (cancelled) return;
+      if (row) {
+        useCheckoutSessionStore.getState().clearSession();
+        useCartStore.getState().clearCart();
+        showToast("Sale completed.", "success");
+        usePendingCheckoutStore.getState().markSuccess(sid);
+        queryClient.invalidateQueries({ queryKey: ["products"] });
+        void recordSaleAppliedIntegrity({
+          transactionId: sid,
+          totalAmount: Number(row.totalAmount ?? row.total ?? 0),
+          source: "reconcile",
+          serverTransactionId: row.id ?? null,
+        }).catch(() => {});
+        void auditSaleCreated({
+          transactionId: row.id,
+          clientTransactionId: sid,
+          total: Number(row.totalAmount ?? row.total ?? 0),
+          channel: "quick",
+          duplicate: false,
+          offlineQueued: false,
+          correlationId: reconcileCorrelationId,
+        });
+      } else {
+        useCheckoutSessionStore.getState().markManualVerificationRequired();
+        usePendingCheckoutStore.getState().markFailed(sid);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const onProductTap = useCallback(
     (p) => {
@@ -165,7 +388,7 @@ export default function QuickSalesPage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-6rem)] flex-col gap-3 pb-28">
+    <div className="flex min-h-[calc(100vh-6rem)] flex-col gap-3 pb-32">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-stone-900 dark:text-stone-100">Quick sale</h1>
@@ -206,8 +429,12 @@ export default function QuickSalesPage() {
         <p className="text-sm text-stone-500 dark:text-stone-400">No products match. Try Inventory to add stock.</p>
       )}
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t-2 border-stone-200 bg-white/95 p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur dark:border-stone-700 dark:bg-stone-900/95">
+      <div
+        className="fixed bottom-14 left-0 right-0 z-[38] border-t-2 border-stone-200 bg-white/95 p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur dark:border-stone-700 dark:bg-stone-900/95"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
         <div className="mx-auto max-w-5xl space-y-3">
+          <TransactionStatePanel />
           {items.length > 0 && (
             <ul className="max-h-24 space-y-1 overflow-y-auto text-sm">
               {items.map((item) => (
@@ -276,12 +503,65 @@ export default function QuickSalesPage() {
 
           <button
             type="button"
-            disabled={loading || !items.length}
-            onClick={() => void onPay()}
+            disabled={!items.length || checkoutBusy || sessionBlocksCheckout}
+            onClick={() => onPay()}
             className="w-full rounded-2xl bg-teal-600 py-4 text-xl font-black text-white shadow-lg hover:bg-teal-700 disabled:opacity-40 dark:bg-teal-500 dark:text-stone-950 dark:hover:bg-teal-400"
           >
-            {loading ? "Processing…" : `Pay ${formatMoney(total, symbol)}`}
+            {checkoutWorkingLabel
+              ? checkoutPrimaryActionLabel(checkoutSessionStatus, "Processing…")
+              : `Pay ${formatMoney(total, symbol)}`}
           </button>
+          {(checkoutSessionStatus === "manual_verification_required" ||
+            checkoutSessionStatus === "verifying") && (
+            <p className="mt-2 text-center text-xs text-amber-800 dark:text-amber-300">
+              {checkoutSessionStatus === "verifying"
+                ? "Confirming sale with the server…"
+                : "We couldn't confirm this sale. Check recent transactions before paying again with the same cart."}
+            </p>
+          )}
+          {activeForChannel && (
+            <div className="mt-2 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={checkingStatus}
+                onClick={async () => {
+                  const result = await runManualCheck();
+                  if (result === MANUAL_CHECK_NETWORK_ERROR) {
+                    showToast("Could not reach the server. Try again shortly.", "error");
+                    return;
+                  }
+                  if (!result) {
+                    showToast(
+                      "No matching sale found yet. Wait a moment or confirm in your sales history.",
+                      "info"
+                    );
+                  }
+                }}
+                className="w-full rounded-2xl border-2 border-stone-300 bg-stone-100 px-3 py-2.5 text-sm font-bold text-stone-800 hover:bg-stone-200 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
+              >
+                {checkingStatus ? "Checking…" : "Check transaction status"}
+              </button>
+              {escapeAvailable && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    showToast(
+                      "Starting fresh. If a payment might have gone through, confirm in your sales history before charging again.",
+                      "info"
+                    );
+                    escapeHatch();
+                  }}
+                  className="w-full rounded-2xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 text-sm font-bold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                >
+                  Start new checkout
+                </button>
+              )}
+            </div>
+          )}
+          <CheckoutAmbiguitySupport
+            visible={checkoutSessionStatus === "manual_verification_required" && activeForChannel}
+            sessionId={checkoutSessionId}
+          />
         </div>
       </div>
 
@@ -328,7 +608,24 @@ export default function QuickSalesPage() {
         </div>
       )}
 
-      <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />
+      <ReceiptModal
+        key={
+          receipt?.transaction?.id != null
+            ? String(receipt.transaction.id)
+            : receipt?.transactionId != null
+              ? String(receipt.transactionId)
+              : "receipt-closed"
+        }
+        receipt={receipt}
+        onClose={() => {
+          setReceipt(null);
+          // Defer route change until after commit — immediate navigate + lazy /pos chunk
+          // could leave a blank shell (race with modal unmount + Suspense).
+          queueMicrotask(() => {
+            navigate("/pos", { replace: true });
+          });
+        }}
+      />
     </div>
   );
 }

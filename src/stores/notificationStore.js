@@ -28,13 +28,21 @@ export const useNotificationStore = create((set) => ({
     set((s) => {
       const rest = s.notifications.filter((n) => n.source !== "sync");
       const failed = Number(failedTransactions || 0);
-      const err = lastSyncError != null && String(lastSyncError).trim() !== "";
+      const rawErr = lastSyncError != null ? String(lastSyncError).trim() : "";
+      const safeErr =
+        rawErr &&
+        !/\n|\r/.test(rawErr) &&
+        !/prisma|postgresql|query engine/i.test(rawErr) &&
+        rawErr.length <= 120
+          ? rawErr.slice(0, 120)
+          : "";
+      const err = Boolean(safeErr);
       if (failed <= 0 && !err) {
         return { notifications: rest };
       }
       const parts = [];
       if (failed > 0) parts.push(`${failed} sale(s) failed to sync`);
-      if (err) parts.push(String(lastSyncError).slice(0, 120));
+      if (err) parts.push(safeErr);
       return {
         notifications: [
           ...rest,

@@ -60,6 +60,7 @@ export async function refreshAccessTokenSilently() {
       });
       return token;
     } catch {
+      // 401 and other failures: return null; api interceptor decides logout after retry rules.
       return null;
     } finally {
       refreshInFlight = null;

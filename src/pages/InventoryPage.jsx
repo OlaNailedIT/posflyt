@@ -12,6 +12,8 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { useAuthStore } from "../stores/authStore";
 import { can } from "../utils/permissions";
 import { formatMoney } from "../utils/currency";
+import { createCorrelationId } from "../audit/auditCorrelation";
+import { auditInventoryCreated, auditInventoryUpdated } from "../audit/auditCalls";
 
 const emptyForm = {
   name: "",
@@ -73,11 +75,18 @@ export default function InventoryPage() {
   }, [focusId, tableRows]);
 
   const createMutation = useMutation({
-    mutationFn: (body) => postProduct(body),
-    onSuccess: () => {
+    mutationFn: ({ body }) => postProduct(body),
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setForm(emptyForm);
       showToast("Product created.", "success");
+      if (data?.id) {
+        void auditInventoryCreated({
+          productId: data.id,
+          name: data.name || "",
+          correlationId: variables.correlationId,
+        });
+      }
     },
     onError: (err) => {
       showToast(err.response?.data?.message || "Could not create product.", "error");
@@ -86,12 +95,29 @@ export default function InventoryPage() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, body }) => putProduct(id, body),
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setEditingId(null);
       setEditBaselineUpdatedAt(null);
       setForm(emptyForm);
       showToast("Product updated.", "success");
+      const prev = products.find((p) => p.id === variables.id);
+      void auditInventoryUpdated({
+        productId: variables.id,
+        before: prev
+          ? {
+              stock: prev.stock,
+              name: prev.name,
+              price: prev.sellingPrice ?? prev.price,
+            }
+          : {},
+        after: {
+          stock: variables.body.stock,
+          name: variables.body.name,
+          price: variables.body.sellingPrice ?? variables.body.price,
+        },
+        correlationId: variables.correlationId,
+      });
     },
     onError: (err) => {
       if (err.response?.data?.code === "CONFLICT") {
@@ -121,6 +147,7 @@ export default function InventoryPage() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    const correlationId = createCorrelationId();
     const ut = form.unitType || "unit";
     const rate = Number(form.sellingPrice);
     const body = {
@@ -153,9 +180,9 @@ export default function InventoryPage() {
 
     if (isOnline) {
       if (editingId) {
-        updateMutation.mutate({ id: editingId, body });
+        updateMutation.mutate({ id: editingId, body, correlationId });
       } else {
-        createMutation.mutate(body);
+        createMutation.mutate({ body, correlationId });
       }
       return;
     }
@@ -174,6 +201,20 @@ export default function InventoryPage() {
         unitType: body.unitType,
         pricePerUnit: body.pricePerUnit ?? null,
       });
+      void auditInventoryUpdated({
+        productId: editingId,
+        before: {
+          stock: prev.stock,
+          name: prev.name,
+          price: prev.sellingPrice ?? prev.price,
+        },
+        after: {
+          stock: body.stock,
+          name: body.name,
+          price: body.sellingPrice ?? body.price,
+        },
+        correlationId,
+      });
     } else {
       const id = crypto.randomUUID();
       const fullBody = { ...body, id };
@@ -190,6 +231,7 @@ export default function InventoryPage() {
         unitType: fullBody.unitType || "unit",
         pricePerUnit: fullBody.pricePerUnit ?? null,
       });
+      void auditInventoryCreated({ productId: id, name: fullBody.name, correlationId });
     }
     await refreshCount();
     await queryClient.invalidateQueries({ queryKey: ["products"] });

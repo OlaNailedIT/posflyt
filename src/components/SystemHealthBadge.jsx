@@ -1,6 +1,7 @@
 import { useSystemHealth } from "../hooks/useSystem";
 import { useOfflineStore } from "../stores/offlineStore";
 
+/** API + connectivity only — trust score lives on the Dashboard “Business status” card. */
 export default function SystemHealthBadge() {
   const { data } = useSystemHealth();
   const isOnline = useOfflineStore((s) => s.isOnline);

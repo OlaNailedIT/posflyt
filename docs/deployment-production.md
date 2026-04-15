@@ -46,7 +46,7 @@ CI does **not** run migrations against production. CI applies the same migration
 | Workflow | Use |
 |----------|-----|
 | **Production & CI** | `prisma migrate deploy` — applies committed migrations only. |
-| **Local development** | `npm run prisma:migrate` (`prisma migrate dev`) — creates migration files and applies them. |
+| **Local development** | `npm run prisma:migrate-dev` — `prisma migrate dev` (creates migration files and applies them). |
 | **Prototyping only** | `npm run prisma:db-push-dev` — **`prisma db push`**, dev-only; does not produce migration history. Do not use against production. |
 
 - The repo must contain `backend/prisma/migrations/` with the initial migration and any follow-ups.

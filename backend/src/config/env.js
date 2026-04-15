@@ -6,6 +6,11 @@ const backendEnv = path.resolve(__dirname, "../../.env");
 dotenv.config({ path: backendEnv });
 dotenv.config();
 
+/** Single source of truth for the primary DB — no hardcoded URLs elsewhere. */
+if (!process.env.DATABASE_URL || String(process.env.DATABASE_URL).trim() === "") {
+  throw new Error("DATABASE_URL is missing. App cannot start.");
+}
+
 const JWT_REFRESH_TTL_MS =
   Number(process.env.JWT_REFRESH_TTL_MS) > 0
     ? Number(process.env.JWT_REFRESH_TTL_MS)
@@ -108,4 +113,25 @@ module.exports = {
   queueEnabled: process.env.QUEUE_ENABLED === "true",
   /** Default TTL seconds for distributed cache entries. */
   cacheTtlSeconds: Math.max(5, Number.parseInt(process.env.CACHE_TTL_SECONDS || "45", 10) || 45),
+  /**
+   * Phase 7 chaos engineering API (`/api/v1/chaos/*`). Off by default.
+   * In production, also require CHAOS_ENGINE_ALLOW_PRODUCTION=true.
+   */
+  chaosEngineEnabled: process.env.CHAOS_ENGINE_ENABLED === "true",
+  chaosEngineAllowProduction: process.env.CHAOS_ENGINE_ALLOW_PRODUCTION === "true",
+  /**
+   * Phase 8 — logical shard count for routing math (single DB today; multi-region later).
+   * Minimum 1; cap 4096.
+   */
+  ledgerShardCount: Math.min(
+    4096,
+    Math.max(1, Number.parseInt(process.env.LEDGER_SHARD_COUNT || "1", 10) || 1)
+  ),
+  /** This process / cluster region id (e.g. eu-west-1, local). */
+  deploymentRegionId: (process.env.DEPLOYMENT_REGION_ID || "local").trim() || "local",
+  /**
+   * Phase 8.3 — reject integrity ingest when tenant home region ≠ this deployment (multi-region cutover).
+   * Default false so single-region + misconfigured maps do not brick traffic.
+   */
+  strictRegionIngest: process.env.STRICT_REGION_INGEST === "true",
 };

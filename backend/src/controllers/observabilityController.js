@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 /**
  * Phase 6 — admin financial observability API.
  */
@@ -123,7 +124,7 @@ async function getUfecHealth(req, res, next) {
         failedTransactions: failed,
         staleSnapshotScopes: health.factors?.snapshotStalenessScopes ?? 0,
       },
-      generatedAt: new Date().toISOString(),
+      generatedAt: nowISOString(),
     });
   } catch (err) {
     return next(err);

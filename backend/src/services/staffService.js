@@ -4,6 +4,7 @@ const { hashPassword } = require("../utils/password");
 const { logAudit } = require("./auditService");
 const { revokeAllUserSessions } = require("./sessionService");
 const { sanitizeDisplayName, normalizeEmail } = require("../utils/sanitize");
+const { toSafeISOString } = require("../utils/date.js");
 
 async function getStaffDisabledMap(businessId) {
   const logs = await prisma.auditLog.findMany({
@@ -47,7 +48,8 @@ async function listStaff(businessId) {
     }),
   ]);
   const lastSeenByUserId = activeSessions.reduce((acc, session) => {
-    const ts = new Date(session.lastSeenAt).toISOString();
+    const ts = toSafeISOString(session.lastSeenAt);
+    if (!ts) return acc;
     if (!acc[session.userId] || new Date(acc[session.userId]).getTime() < new Date(ts).getTime()) {
       acc[session.userId] = ts;
     }

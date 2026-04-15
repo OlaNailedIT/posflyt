@@ -1,3 +1,4 @@
+const { nowISOString } = require("../../utils/date.js");
 /**
  * Phase 6 — aggregates from integrity + commerce tables (system health, lag, volume).
  */
@@ -81,7 +82,7 @@ async function getObservabilitySummary(prisma, businessId) {
       /** Heuristic: stale snapshots imply projection/snapshot path behind ingest. */
       snapshotBehindScopes: staleRows.length,
     },
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowISOString(),
   };
 }
 
@@ -118,7 +119,7 @@ async function getObservabilityHealth(prisma, businessId) {
       integrityEventsTotal: summary.integrityEvents.total,
       snapshotsTotal: summary.snapshots.total,
     },
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowISOString(),
   };
 }
 

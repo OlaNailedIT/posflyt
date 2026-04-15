@@ -14,6 +14,7 @@ import { can } from "../utils/permissions";
 import { formatMoney } from "../utils/currency";
 import { createCorrelationId } from "../audit/auditCorrelation";
 import { auditInventoryCreated, auditInventoryUpdated } from "../audit/auditCalls";
+import { nowISOString } from "../utils/safeDate";
 
 const emptyForm = {
   name: "",
@@ -131,7 +132,7 @@ export default function InventoryPage() {
   const startEdit = (p) => {
     setEditingId(p.id);
     setEditBaselineUpdatedAt(
-      p.updatedAt ? String(p.updatedAt) : p.createdAt ? String(p.createdAt) : new Date().toISOString()
+      p.updatedAt ? String(p.updatedAt) : p.createdAt ? String(p.createdAt) : nowISOString()
     );
     const ut = p.unitType || "unit";
     setForm({
@@ -175,7 +176,7 @@ export default function InventoryPage() {
         editBaselineUpdatedAt ||
         products.find((x) => x.id === editingId)?.updatedAt ||
         products.find((x) => x.id === editingId)?.createdAt;
-      body.lastKnownUpdatedAt = baseline ? String(baseline) : new Date().toISOString();
+      body.lastKnownUpdatedAt = baseline ? String(baseline) : nowISOString();
     }
 
     if (isOnline) {

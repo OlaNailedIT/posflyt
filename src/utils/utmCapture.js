@@ -1,3 +1,5 @@
+import { nowISOString } from "./safeDate.js";
+
 const STORAGE_KEY = "posflyt_attribution_v1";
 
 /**
@@ -33,7 +35,7 @@ export function captureAttributionFromUrl() {
       }
     }
     if (any) {
-      out.capturedAt = new Date().toISOString();
+      out.capturedAt = nowISOString();
       out.landingPath = window.location.pathname + window.location.search;
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(out));
     }

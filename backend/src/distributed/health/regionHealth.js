@@ -1,3 +1,4 @@
+const { nowISOString } = require("../../utils/date.js");
 /**
  * Phase 8.7 — process-local region health (DB reachability for this deployment).
  */
@@ -21,7 +22,7 @@ function degradedLatencyThresholdMs() {
  */
 async function getRegionHealth(regionId) {
   const rid = String(regionId || "").trim() || deploymentRegionId;
-  const lastHeartbeat = new Date().toISOString();
+  const lastHeartbeat = nowISOString();
 
   if (rid !== deploymentRegionId) {
     return {

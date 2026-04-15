@@ -1,3 +1,5 @@
+import { safeToISOString } from "../utils/safeDate";
+
 /**
  * Shared POS transaction payload builder (standard + quick sales).
  * @param {object} opts
@@ -65,7 +67,8 @@ export function buildCheckoutPayload({
       payment_method: "CREDIT",
     };
     if (dueDate) {
-      out.due_date = new Date(dueDate).toISOString();
+      const dueIso = safeToISOString(dueDate);
+      if (dueIso) out.due_date = dueIso;
     }
     return out;
   }

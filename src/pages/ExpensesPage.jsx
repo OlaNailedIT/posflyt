@@ -8,6 +8,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { useToastStore } from "../stores/toastStore";
 import { formatMoney } from "../utils/currency";
 import { DEFAULT_EXPENSE_CATEGORIES } from "../config/expenseCategories";
+import { nowISOString, safeToISOString } from "../utils/safeDate";
 
 const CATEGORY_OTHER = "other";
 
@@ -25,7 +26,10 @@ function utcTodayRangeIso() {
   const now = new Date();
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-  return { from: from.toISOString(), to: to.toISOString() };
+  return {
+    from: safeToISOString(from) ?? nowISOString(),
+    to: safeToISOString(to) ?? nowISOString(),
+  };
 }
 
 function formatCategoryDisplay(cat) {

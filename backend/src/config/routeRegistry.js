@@ -5,6 +5,9 @@
  * Pairs are (mount prefix, second argument identifier). Order does not matter for validation.
  *
  * Not listed here: middleware-only `app.use(fn)` (e.g. jsonBodyParser, apiLimiter).
+ *
+ * Example — `auditRoutes` is mounted at `/` and `/api`; handlers are `POST /audit-events/bulk`,
+ * `GET /audit-logs` (full URLs: `/...` and `/api/...`).
  */
 
 /** @type {Array<[string, string]>} */
@@ -49,6 +52,19 @@ const expectedRouterMounts = [
   ["/api", "settingsRoutes"],
   ["/api", "expenseRoutes"],
   ["/api", "dashboardRoutes"],
+  ["/api", "adminRoutes"],
+  ["/api", "reportRoutes"],
+  ["/api", "exportRoutes"],
+  ["/api", "onboardingRoutes"],
+  ["/api", "analyticsRoutes"],
+  ["/api", "billingRoutes"],
+  ["/api", "backupRoutes"],
+  ["/api", "sessionRoutes"],
+  ["/api", "supportRoutes"],
+  ["/api", "staffRoutes"],
+  ["/api", "usageRoutes"],
+  ["/api", "marketingRoutes"],
+  ["/api", "systemRoutes"],
   ["/api", "auditRoutes"],
 ];
 

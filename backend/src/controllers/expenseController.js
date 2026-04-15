@@ -14,16 +14,32 @@ const createSchema = z
     amount: z.coerce.number(),
     category: z.string().min(1),
     note: z.string().optional(),
-    expense_date: z.string().min(8).max(16).optional(),
+    expense_date: z.preprocess(
+      (v) => (v === "" || v == null ? undefined : v),
+      z
+        .string()
+        .min(8)
+        .max(32)
+        .refine((s) => !Number.isNaN(Date.parse(s)), "Invalid expense_date")
+        .optional()
+    ),
     request_id: z.string().min(1).optional(),
     event_id: z.string().min(1).optional(),
   })
   .strict();
 
+const optionalQueryDate = z.preprocess(
+  (v) => (v === "" || v == null ? undefined : String(v).trim()),
+  z
+    .string()
+    .optional()
+    .refine((s) => s == null || !Number.isNaN(Date.parse(s)), "Invalid date")
+);
+
 const queryRangeSchema = z
   .object({
-    from: z.string().optional(),
-    to: z.string().optional(),
+    from: optionalQueryDate,
+    to: optionalQueryDate,
   })
   .strict();
 

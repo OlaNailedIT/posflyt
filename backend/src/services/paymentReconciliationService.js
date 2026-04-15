@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const prisma = require("../config/prisma");
 const { stripeSecretKey, paystackSecretKey } = require("../config/env");
 const { logger } = require("../utils/logger");
@@ -107,7 +108,7 @@ async function reconcilePaymentsForBusiness(businessId) {
     }
   }
 
-  return { discrepancies, checkedAt: new Date().toISOString(), sampleSize: paid.length };
+  return { discrepancies, checkedAt: nowISOString(), sampleSize: paid.length };
 }
 
 /**
@@ -198,7 +199,7 @@ async function applyReconciliationFixes(businessId) {
     }
   }
 
-  return { applied, skipped, errors, at: new Date().toISOString() };
+  return { applied, skipped, errors, at: nowISOString() };
 }
 
 module.exports = { reconcilePaymentsForBusiness, applyReconciliationFixes };

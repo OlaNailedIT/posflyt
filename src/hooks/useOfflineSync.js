@@ -37,6 +37,7 @@ import { useOfflineStore } from "../stores/offlineStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 import { useOnlineStatus } from "./useOnlineStatus";
 import { isRecoverableNetworkError } from "../utils/networkError";
+import { nowISOString, safeToISOString } from "../utils/safeDate";
 import { maybeAutoIndexedDBBackup } from "../services/indexeddbBackup";
 import { usePendingCheckoutStore } from "../stores/pendingCheckoutStore";
 import {
@@ -159,7 +160,8 @@ async function syncOneTransaction(item, onProgress) {
     patch.client_transaction_id = crypto.randomUUID();
   }
   if (!item.payload?.created_at) {
-    patch.created_at = new Date(Number(item.createdAt) || Date.now()).toISOString();
+    patch.created_at =
+      safeToISOString(Number(item.createdAt) || Date.now()) ?? nowISOString();
   }
   let payload = item.payload;
   if (Object.keys(patch).length > 0) {
@@ -560,8 +562,8 @@ export function useOfflineSync() {
       failedTransactions: failedCount,
     });
     setQueueMeta({
-      queueLastAttemptAt: queueLastAttemptAt ? new Date(queueLastAttemptAt).toISOString() : null,
-      queueNextRetryAt: queueNextRetryAt ? new Date(queueNextRetryAt).toISOString() : null,
+      queueLastAttemptAt: queueLastAttemptAt ? safeToISOString(queueLastAttemptAt) : null,
+      queueNextRetryAt: queueNextRetryAt ? safeToISOString(queueNextRetryAt) : null,
     });
     setLastSyncError(failedItems[0]?.lastError || failedItems[0]?.syncError || null, failedItems[0]?.lastErrorCode || null);
   }, [setLastSyncError, setQueueBreakdown, setQueueMeta]);
@@ -600,7 +602,7 @@ export function useOfflineSync() {
 
         try {
           if (import.meta.env.DEV) {
-            console.log("SYNC_RUN_START", { time: new Date().toISOString() });
+            console.log("SYNC_RUN_START", { time: nowISOString() });
           }
           const maxRounds = 500;
           let lastBatchMs = 0;
@@ -720,7 +722,7 @@ export function useOfflineSync() {
           await queryClient.invalidateQueries({ queryKey: ["expenses"] });
           await queryClient.invalidateQueries({ queryKey: ["daily-summary"] });
           const finishedAt = Date.now();
-          setLastSyncedAt(new Date(finishedAt).toISOString());
+          setLastSyncedAt(safeToISOString(finishedAt) ?? nowISOString());
           setLastSuccessfulSyncAt(finishedAt);
           void maybeAutoIndexedDBBackup();
         } finally {

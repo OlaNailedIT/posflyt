@@ -21,23 +21,21 @@ The SPA uses **relative** paths like `/products`, `/auth/login`, and separately 
 - **Recommended:** `VITE_API_URL` = API origin **only**, e.g. `https://api.example.com` (no trailing `/api`).
 - If `VITE_API_URL` is `https://api.example.com/api`, then `/products` becomes `https://api.example.com/api/products`. The server must expose that URL.
 
-## Controlled `/api` aliases (compatibility only)
+## API compatibility layer (`/api`)
 
-We **do not** duplicate every router under `/api` (avoids silent drift). Aliases cover the main **legacy** surfaces that are hit when the client base URL wrongly includes `/api`:
+When `VITE_API_URL` ends with `/api`, the SPA’s relative paths (e.g. `/admin/sales-feed`, `/audit-events/bulk`) must resolve under `/api/...`. The same router modules are mounted at `/` and again under `app.use("/api", …)` — **one handler**, two URL prefixes.
 
-| Alias mount | Legacy surface |
-|-------------|----------------|
-| `/api/auth` | Same as `/auth` |
-| `/api/products` | Same as `/products` |
-| `/api/inventory-count` | Same as `/inventory-count` |
-| `/api/transactions` | Same as `/transactions` |
-| `app.use("/api", customerRoutes)` | `/customers` |
-| `app.use("/api", settingsRoutes)` | `/settings` |
-| `app.use("/api", expenseRoutes)` | `/expenses`, `/expenses/meta` |
-| `app.use("/api", dashboardRoutes)` | `/dashboard-stats`, `/analytics/daily-summary` |
-| `app.use("/api", auditRoutes)` | `/audit-events/bulk`, `/audit-logs` |
+| Mount | Same routes as |
+|-------|------------------|
+| `/api/auth` (+ limiter) | `/auth` |
+| `/api/products` | `/products` |
+| `/api/inventory-count` | `/inventory-count` |
+| `/api/transactions` | `/transactions` |
+| `app.use("/api", …)` | `customerRoutes`, `settingsRoutes`, `expenseRoutes`, `dashboardRoutes`, `adminRoutes`, `reportRoutes`, `exportRoutes`, `onboardingRoutes`, `analyticsRoutes`, `billingRoutes`, `backupRoutes`, `sessionRoutes`, `supportRoutes`, `staffRoutes`, `usageRoutes`, `marketingRoutes`, `systemRoutes`, `auditRoutes` |
 
-**Not duplicated under `/api`:** admin, billing, reports, backup, staff, analytics, etc. Fix the client base URL or add a **narrow** alias only when a real caller requires it.
+**Audit:** `POST /audit-events/bulk`, `GET /audit-logs` — work as `/…` and `/api/…`.
+
+**Not duplicated under generic `/api`:** **`/api/v1/*`** (versioned), **`/api/admin`** (ops `adminApiRoutes`), **`/api/bi`** — those paths already carry their own prefix in `api.js`; mounting them again would double-prefix.
 
 ## Infrastructure aliases
 

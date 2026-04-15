@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const prisma = require("../config/prisma");
 const { nodeEnv } = require("../config/env");
 const { logger } = require("../utils/logger");
@@ -54,7 +55,7 @@ async function recordLowStockAlertIfNeeded(tx, { businessId, plan, product, newS
       threshold: thr,
       source,
       dayUtc,
-      timestamp: new Date().toISOString(),
+      timestamp: nowISOString(),
     },
     "low stock threshold reached"
   );

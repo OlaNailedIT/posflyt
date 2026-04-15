@@ -1,6 +1,7 @@
 import { openDB } from "idb";
 import { emitOfflineTelemetry } from "../utils/offlineTelemetry.js";
 import { logSchemaDrift } from "../utils/schemaDriftLog.js";
+import { nowISOString } from "../utils/safeDate.js";
 
 function isIndexedDbMissingStoreError(e) {
   return e?.name === "NotFoundError" || e?.name === "InvalidStateError";
@@ -948,7 +949,7 @@ export async function exportIndexedDBFullSnapshot() {
   return {
     dbName: DB_NAME,
     dbVersion: DB_VERSION,
-    exportedAt: new Date().toISOString(),
+    exportedAt: nowISOString(),
     stores,
   };
 }

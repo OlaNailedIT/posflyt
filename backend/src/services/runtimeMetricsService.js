@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 /**
  * In-process metrics for Phase 7.1 observability (Prometheus scrape + admin JSON).
  * Low-cardinality route groups only.
@@ -11,7 +12,7 @@ const state = {
   api5xxCount: 0,
   /** Requests with total duration ≥ 1s (Phase 7.3 tuning signal). */
   httpSlowTotal: 0,
-  startedAt: new Date().toISOString(),
+  startedAt: nowISOString(),
   startedAtMs: Date.now(),
   syncRetryResolution: {
     resolvedCount: 0,

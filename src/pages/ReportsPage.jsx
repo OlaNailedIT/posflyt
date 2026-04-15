@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSalesReport } from "../hooks/useSalesReport";
 import { formatMoney } from "../utils/currency";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -6,6 +6,7 @@ import { exportCsv } from "../services/api";
 import { useAuthStore } from "../stores/authStore";
 import { useOfflineStore } from "../stores/offlineStore";
 import { useToastStore } from "../stores/toastStore";
+import { formatDateTimeLocale, safeToISOString } from "../utils/safeDate";
 
 export default function ReportsPage() {
   const [from, setFrom] = useState("");
@@ -14,13 +15,16 @@ export default function ReportsPage() {
   const isOnline = useOfflineStore((s) => s.isOnline);
   const showToast = useToastStore((s) => s.showToast);
   const settings = useSettingsStore((s) => s.settings);
-  const { data, isLoading } = useSalesReport(
-    {
-      ...(from ? { from: new Date(`${from}T00:00:00.000Z`).toISOString() } : {}),
-      ...(to ? { to: new Date(`${to}T23:59:59.999Z`).toISOString() } : {}),
-    },
-    plan !== "FREE"
-  );
+  const reportParams = useMemo(() => {
+    const fromIso = from ? safeToISOString(`${from}T00:00:00.000Z`) : null;
+    const toIso = to ? safeToISOString(`${to}T23:59:59.999Z`) : null;
+    return {
+      ...(fromIso ? { from: fromIso } : {}),
+      ...(toIso ? { to: toIso } : {}),
+    };
+  }, [from, to]);
+
+  const { data, isLoading } = useSalesReport(reportParams, plan !== "FREE");
 
   const onExport = async (type) => {
     if (!isOnline) {
@@ -118,7 +122,7 @@ export default function ReportsPage() {
         <div className="mt-2 space-y-2">
           {(data?.trend || []).map((entry) => (
             <div key={entry.id} className="flex flex-col gap-1 rounded border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-              <span>{new Date(entry.createdAt).toLocaleString()}</span>
+              <span>{formatDateTimeLocale(entry.createdAt)}</span>
               <span>{formatMoney(entry.total, settings.currencySymbol)}</span>
             </div>
           ))}

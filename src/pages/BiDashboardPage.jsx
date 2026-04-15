@@ -20,13 +20,17 @@ import { useBiSnapshot, useBiTransactionsDrilldown } from "../hooks/useBiDashboa
 import { downloadCsv, downloadJson } from "../utils/csvExport";
 import { useToastStore } from "../stores/toastStore";
 import FeatureGate from "../components/FeatureGate";
+import { formatDateTimeLocale, nowISOString, safeToISOString } from "../utils/safeDate";
 
 const PIE_COLORS = ["#0d9488", "#14b8a6", "#5eead4", "#99f6e4", "#ccfbf1", "#78716c"];
 
 function defaultRange() {
   const to = new Date();
   const from = new Date(Date.now() - 30 * 86400000);
-  return { from: from.toISOString(), to: to.toISOString() };
+  return {
+    from: safeToISOString(from) ?? nowISOString(),
+    to: safeToISOString(to) ?? nowISOString(),
+  };
 }
 
 function transactionPaymentLabel(status) {
@@ -196,7 +200,10 @@ export default function BiDashboardPage() {
   const applyPreset = (days) => {
     const to = new Date();
     const from = new Date(Date.now() - days * 86400000);
-    setRange({ from: from.toISOString(), to: to.toISOString() });
+    setRange({
+      from: safeToISOString(from) ?? nowISOString(),
+      to: safeToISOString(to) ?? nowISOString(),
+    });
     setTxPage(1);
   };
 
@@ -262,7 +269,9 @@ export default function BiDashboardPage() {
             className="mt-1 w-full rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-950"
             value={range.from.slice(0, 16)}
             onChange={(e) => {
-              setRange((r) => ({ ...r, from: new Date(e.target.value).toISOString() }));
+              const iso = safeToISOString(e.target.value);
+              if (!iso) return;
+              setRange((r) => ({ ...r, from: iso }));
               setTxPage(1);
             }}
           />
@@ -274,7 +283,9 @@ export default function BiDashboardPage() {
             className="mt-1 w-full rounded border border-stone-300 px-2 py-1 text-sm dark:border-stone-600 dark:bg-stone-950"
             value={range.to.slice(0, 16)}
             onChange={(e) => {
-              setRange((r) => ({ ...r, to: new Date(e.target.value).toISOString() }));
+              const iso = safeToISOString(e.target.value);
+              if (!iso) return;
+              setRange((r) => ({ ...r, to: iso }));
               setTxPage(1);
             }}
           />
@@ -537,7 +548,7 @@ export default function BiDashboardPage() {
                   </td>
                   <td className="px-3 py-2 text-xs">{transactionPaymentLabel(r.paymentStatus)}</td>
                   <td className="px-3 py-2">{r.syncStatus}</td>
-                  <td className="px-3 py-2">{new Date(r.createdAt).toLocaleString()}</td>
+                  <td className="px-3 py-2">{formatDateTimeLocale(r.createdAt)}</td>
                   <td className="px-3 py-2 text-xs">{r.customer?.name || "—"}</td>
                 </tr>
               ))}

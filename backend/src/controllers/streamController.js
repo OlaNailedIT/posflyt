@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 /**
  * Phase 6.5 — read in-memory stream buffer (admin / ops). Not a durable Kafka log.
  */
@@ -52,7 +53,7 @@ async function getStreamStats(req, res, next) {
     return sendOk(res, {
       bus: getEventBus().snapshotStats(),
       typeCounts: getStreamTypeCounts(),
-      generatedAt: new Date().toISOString(),
+      generatedAt: nowISOString(),
     });
   } catch (err) {
     return next(err);

@@ -3,6 +3,7 @@
  * Checkout must not depend on cart state after capture (lines are deep-copied).
  */
 import { roundCurrency } from "../utils/currency";
+import { nowISOString } from "../utils/safeDate.js";
 import { buildCheckoutPayload } from "./posCheckout";
 
 /** Placeholders for intent fingerprint pre-pass (ids excluded from intent hash). */
@@ -40,7 +41,7 @@ export function capturePosCheckoutSnapshot({
   splitPaymentEnabled,
   splitLines,
 }) {
-  const createdAtIso = new Date().toISOString();
+  const createdAtIso = nowISOString();
   const lines = cloneLines(items);
 
   let splitPayments;
@@ -77,7 +78,7 @@ export function captureQuickCheckoutSnapshot({
   paymentMethod,
   clientDurationMs,
 }) {
-  const createdAtIso = new Date().toISOString();
+  const createdAtIso = nowISOString();
   const lines = cloneLines(items);
 
   return {

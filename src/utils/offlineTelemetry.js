@@ -1,3 +1,5 @@
+import { nowISOString } from "./safeDate.js";
+
 /**
  * Structured offline-queue / sync events (migration, observability). Same shape as checkout telemetry.
  * @param {string} event
@@ -7,7 +9,7 @@ export function emitOfflineTelemetry(event, payload = {}) {
   const row = {
     domain: "offline",
     event,
-    ts: new Date().toISOString(),
+    ts: nowISOString(),
     ...payload,
   };
   if (import.meta.env.DEV) {

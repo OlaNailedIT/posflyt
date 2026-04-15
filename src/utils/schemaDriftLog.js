@@ -8,6 +8,7 @@
  * Session `driftCount` is product/debug intelligence: rare = normal; climbing fast = investigate.
  */
 import * as Sentry from "@sentry/react";
+import { nowISOString } from "./safeDate.js";
 
 let driftCount = 0;
 
@@ -39,7 +40,7 @@ export function logSchemaDrift(details, opts = {}) {
 
   const payload = {
     category: "SCHEMA_DRIFT",
-    ts: new Date().toISOString(),
+    ts: nowISOString(),
     ...details,
   };
   const isReadFallback = details.kind === "read_fallback";

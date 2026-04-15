@@ -1,3 +1,4 @@
+const { nowISOString } = require("../../utils/date.js");
 /**
  * Structured observability log shape (Phase 6 bus). Safe to pipe to logger or future event sink.
  * @param {object} o
@@ -10,7 +11,7 @@
 function buildStructuredObservabilityEvent(o) {
   return {
     v: 1,
-    ts: new Date().toISOString(),
+    ts: nowISOString(),
     type: o.type,
     businessId: o.businessId,
     clientTransactionId: o.clientTransactionId ?? null,

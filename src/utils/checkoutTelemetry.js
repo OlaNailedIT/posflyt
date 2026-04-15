@@ -3,6 +3,8 @@
  * Logs JSON in production (one line) for log pipelines; readable in dev.
  */
 
+import { nowISOString } from "./safeDate.js";
+
 function shortId(id) {
   if (id == null || typeof id !== "string") return null;
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
@@ -16,7 +18,7 @@ export function emitCheckoutTelemetry(event, payload = {}) {
   const row = {
     domain: "checkout",
     event,
-    ts: new Date().toISOString(),
+    ts: nowISOString(),
     ...payload,
   };
   if (import.meta.env.DEV) {

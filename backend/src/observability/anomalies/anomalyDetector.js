@@ -1,3 +1,4 @@
+const { nowISOString } = require("../../utils/date.js");
 /**
  * Phase 6 — anomaly feed from snapshot lag + optional deep reconciliation samples.
  */
@@ -59,7 +60,7 @@ async function getObservabilityAnomalies(prisma, businessId, opts = {}) {
   }
 
   if (!deep) {
-    return { items, deepScan: false, generatedAt: new Date().toISOString() };
+    return { items, deepScan: false, generatedAt: nowISOString() };
   }
 
   const reconciliationSamples = [];
@@ -92,7 +93,7 @@ async function getObservabilityAnomalies(prisma, businessId, opts = {}) {
     items,
     deepScan: true,
     reconciliationSamples,
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowISOString(),
   };
 }
 

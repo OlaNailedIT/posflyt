@@ -1,4 +1,13 @@
-name: Deploy Staging
+# Phase 6.5 — CI/CD Pipeline (staging path)
+#
+# Git push → CI (ci.yml): build, predeploy, migrate deploy (ephemeral DB), tests
+#   → this workflow: staging deploy hook + health checks (main only)
+# Production: deploy-production.yml (manual workflow_dispatch + environment approval)
+#
+# We do NOT run prisma migrate deploy against production DATABASE_URL from Actions:
+# migrations run on the host via `npm run start:prod` (see docs/CI_CD_PIPELINE.md).
+
+name: CI/CD Pipeline
 
 on:
   workflow_run:
@@ -7,11 +16,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: posflyt-cd-staging-${{ github.repository }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  staging:
     name: Deploy and Verify Staging
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest

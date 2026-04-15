@@ -23,20 +23,20 @@ export default function SyncStatusIndicator() {
   if (syncingActive && total > 0) {
     label =
       progressFailed > 0
-        ? `Retrying failed items… ${done}/${total}`
-        : `Syncing ${done}/${total} items…`;
+        ? `Syncing transactions… ${done}/${total} · ${progressFailed} issue(s)`
+        : `Syncing transactions… ${done}/${total}`;
     className =
       "rounded-lg border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-200";
   } else if (syncingActive) {
-    label = "Syncing…";
+    label = "Syncing transactions…";
     className =
       "rounded-lg border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-200";
   } else if (failedTransactions > 0) {
-    label = "⚠️ Sync issues detected";
+    label = "Sync needs attention";
     className =
       "rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200";
   } else if (pendingTransactions > 0) {
-    label = "Pending sync";
+    label = `Pending sync (${pendingTransactions})`;
     className =
       "rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200";
   }

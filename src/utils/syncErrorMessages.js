@@ -27,7 +27,10 @@ export function explainSyncError(codeOrMessage) {
       return "This sale was already recorded.";
     default:
       if (key.length > 120) {
-        return `${key.slice(0, 117)}…`;
+        return "Something went wrong while syncing. Your sale is still on this device — try again or ask a manager.";
+      }
+      if (/^[A-Z][A-Z0-9_]+$/.test(key)) {
+        return "A sync issue occurred. Your data on this device is safe — try again shortly.";
       }
       return key;
   }

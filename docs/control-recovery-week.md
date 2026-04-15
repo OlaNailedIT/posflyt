@@ -49,7 +49,7 @@ Production deploy is blocked unless all are true:
 | --- | --- | --- | --- |
 | Day 0 | Prep | Ownership + freeze + hard gate | `docs/control-recovery-week.md` |
 | Day 1 | CI Foundation | PR checks and merge gate policy | `.github/workflows/ci.yml`, README badge, branch protection doc |
-| Day 2 | Staging Gate | Auto deploy staging and enforce post-deploy health checks | `.github/workflows/deploy-staging.yml`, `docs/environments.md` |
+| Day 2 | Staging Gate | Auto deploy staging and enforce post-deploy health checks | `.github/workflows/deploy.yml`, `docs/environments.md` |
 | Day 3 | Prod + Rollback | Manual approval, release tags, rollback process | `.github/workflows/deploy-production.yml`, `docs/release-process.md`, runbook update |
 | Day 4 | Observability | Sentry + structured logs + request ID correlation | `docs/observability.md`, instrumentation changes |
 | Day 5 | Security Baseline | login boundary hardening + secrets process | `docs/security-baseline.md` |

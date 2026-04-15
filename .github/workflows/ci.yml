@@ -1,3 +1,5 @@
+# Phase 6.5 — validation gate: predeploy, migrate deploy (ephemeral DB), tests, frontend build.
+# Maps to docs/PRODUCTION_GO_NO_GO.md §1–2 (build/CI + migration safety in CI).
 name: CI
 
 on:
@@ -8,6 +10,7 @@ on:
 
 jobs:
   backend:
+    name: Backend — env guard, predeploy, migrate, tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -26,10 +29,14 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    # Ephemeral Postgres credentials — CI only. Never reuse for staging/production.
+    # See backend/docs/DEPLOYMENT_ENVIRONMENT_RULES.md §12 and backend/.env.ci.example
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/posflyt_test?schema=public
       JWT_SECRET: ci-test-jwt-secret-not-for-production-min-16
       NODE_ENV: test
+      # Phase 6.3 — migration validation tier (deploy-only); must match prisma-env-policy staging rules
+      MIGRATION_ENV: staging
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,16 +46,21 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install
         run: npm ci
-      - name: Prisma validate
-        run: npx prisma validate
-      - name: Prisma migrate (test database)
-        run: npx prisma migrate deploy
-      - name: Unit tests
+      - name: "Gate: CI env guard"
+        run: node scripts/ci-env-guard.js
+      - name: "Gate: Predeploy (prisma validate — same as npm run predeploy / start:prod)"
+        run: npm run predeploy
+      - name: "Gate: Prisma safety + migrate deploy (ephemeral DB)"
+        run: node scripts/prisma-safety-check.js prisma migrate deploy
+      - name: "Gate: Unit tests"
         run: npm test
-      - name: Integration tests
+      - name: "Gate: Integration tests"
         run: npm run test:integration
+      - name: "Gate: Route registry (app.js mounts vs routeRegistry.js)"
+        run: npm run route:validate
 
   frontend:
+    name: Frontend — install and build
     runs-on: ubuntu-latest
     defaults:
       run:

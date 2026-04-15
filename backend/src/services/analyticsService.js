@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { isLowStockCondition } = require("../utils/lowStock");
 
 function startOfUtcDay(date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
@@ -68,13 +69,13 @@ async function getStaffPerformance(businessId) {
       id: true,
       name: true,
       transactions: {
-        select: { total: true },
+        select: { totalAmount: true },
       },
     },
   });
 
   return users.map((user) => {
-    const totalSales = user.transactions.reduce((sum, tx) => sum + Number(tx.total), 0);
+    const totalSales = user.transactions.reduce((sum, tx) => sum + Number(tx.totalAmount), 0);
     const transactionsCount = user.transactions.length;
     return {
       userId: user.id,
@@ -98,16 +99,16 @@ async function generateSmartAlerts(businessId) {
   const [todayAgg, yesterdayAgg] = await Promise.all([
     prisma.transaction.aggregate({
       where: { businessId, createdAt: { gte: todayStart, lte: todayEnd } },
-      _sum: { total: true },
+      _sum: { totalAmount: true },
     }),
     prisma.transaction.aggregate({
       where: { businessId, createdAt: { gte: yesterdayStart, lte: yesterdayEnd } },
-      _sum: { total: true },
+      _sum: { totalAmount: true },
     }),
   ]);
 
-  const today = Number(todayAgg._sum.total || 0);
-  const yesterday = Number(yesterdayAgg._sum.total || 0);
+  const today = Number(todayAgg._sum.totalAmount || 0);
+  const yesterday = Number(yesterdayAgg._sum.totalAmount || 0);
 
   if (yesterday > 0 && today >= yesterday * 1.5) {
     await prisma.smartAlert.upsert({
@@ -205,7 +206,7 @@ async function getInsights(businessId) {
     .map(([hour]) => `${String(hour).padStart(2, "0")}:00-${String((hour + 1) % 24).padStart(2, "0")}:00`);
 
   const suggestions = [];
-  if (topProduct && Number(topProduct.stock) <= Number(topProduct.lowStockThreshold || 10)) {
+  if (topProduct && isLowStockCondition(Number(topProduct.stock), topProduct.lowStockThreshold)) {
     suggestions.push(`Restock product ${topProduct.name}.`);
   }
   suggestions.push("Review weekly sales trend for sudden drops.");
@@ -233,14 +234,14 @@ async function getForecast(businessId) {
 
   const txs = await prisma.transaction.findMany({
     where: { businessId, createdAt: { gte: start, lte: now } },
-    select: { total: true, createdAt: true },
+    select: { totalAmount: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
 
   const dayBuckets = new Map();
   for (const tx of txs) {
     const key = tx.createdAt.toISOString().slice(0, 10);
-    dayBuckets.set(key, (dayBuckets.get(key) || 0) + Number(tx.total));
+    dayBuckets.set(key, (dayBuckets.get(key) || 0) + Number(tx.totalAmount));
   }
   const last7 = [];
   for (let i = 6; i >= 0; i -= 1) {
@@ -283,12 +284,12 @@ async function getForecastDataset(businessId) {
   start.setUTCDate(start.getUTCDate() - 90);
   const txs = await prisma.transaction.findMany({
     where: { businessId, createdAt: { gte: start, lte: now } },
-    select: { createdAt: true, total: true },
+    select: { createdAt: true, totalAmount: true },
     orderBy: { createdAt: "asc" },
   });
   const series = txs.map((tx) => ({
     timestamp: tx.createdAt.toISOString(),
-    value: Number(tx.total),
+    value: Number(tx.totalAmount),
   }));
   return {
     series,

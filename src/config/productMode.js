@@ -1,4 +1,5 @@
-export const VALIDATION_MODE = true;
+/** Set to `false` for production / pilot so admin ops, backups, and full nav are available. */
+export const VALIDATION_MODE = false;
 
 export const CORE_POSITIONING =
   "Never lose a sale. Never guess your stock. Even when internet fails.";

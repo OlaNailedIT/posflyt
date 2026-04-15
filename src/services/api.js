@@ -5,6 +5,7 @@ import { useAuthStore } from "../stores/authStore";
 import { useConflictStore } from "../stores/conflictStore";
 import { useToastStore } from "../stores/toastStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
+import { showFriendlyErrorToast } from "../utils/friendlyApiError";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -17,6 +18,21 @@ function unwrap(data) {
     : data;
 }
 
+/**
+ * Phase 2 Step 6 — `postTransaction` / `postTransactionReturn` must only run from
+ * `executeFinancialEvent` (re-entrancy-safe depth counter).
+ */
+let _ufecFinancialApiDepth = 0;
+
+/** @internal Used exclusively by executeFinancialEvent */
+export function ufecFinancialApiEnter() {
+  _ufecFinancialApiDepth += 1;
+}
+
+export function ufecFinancialApiExit() {
+  _ufecFinancialApiDepth = Math.max(0, _ufecFinancialApiDepth - 1);
+}
+
 /** In-memory token first (fresh login), then `auth_token` / persisted Zustand. */
 function resolveAuthToken() {
   const fromStore = useAuthStore.getState().token;
@@ -27,7 +43,7 @@ function resolveAuthToken() {
 /** Login/register failures: do not logout or retry. */
 function isAuthRouteRequest(config) {
   const url = String(config?.url || "");
-  return /\/auth\//.test(url);
+  return /\/auth\//.test(url) || url.includes("/staff/accept-invite");
 }
 
 function isRefreshRequest(config) {
@@ -86,6 +102,9 @@ api.interceptors.response.use(
     }
     if (!error.response) {
       error.isNetworkError = true;
+      if (!isAuthRouteRequest(error.config) && !error.config?.skipGlobalToast) {
+        showFriendlyErrorToast(error, (m, k) => useToastStore.getState().showToast(m, k));
+      }
       return Promise.reject(error);
     }
 
@@ -118,7 +137,7 @@ api.interceptors.response.use(
     }
     if (status === 403 && apiCode === "FEATURE_DISABLED") {
       useToastStore.getState().showToast(
-        error.response?.data?.message || "This feature is not enabled for your plan.",
+        error.response?.data?.message || "Credit feature is disabled.",
         "error"
       );
       return Promise.reject(error);
@@ -130,7 +149,18 @@ api.interceptors.response.use(
       );
       return Promise.reject(error);
     }
+    if (status >= 500 && status < 600 && config && !isAuthRouteRequest(config) && !config?.skipGlobalToast) {
+      showFriendlyErrorToast(error, (m, k) => useToastStore.getState().showToast(m, k));
+      return Promise.reject(error);
+    }
+    // Session invalidation: only 401 (after refresh retry rules below). Never logout on generic network/5xx.
     if (status !== 401 || !config) {
+      return Promise.reject(error);
+    }
+
+    const offlineOnly =
+      useAuthStore.getState().offlineSessionActive && !useAuthStore.getState().token;
+    if (offlineOnly && typeof navigator !== "undefined" && !navigator.onLine) {
       return Promise.reject(error);
     }
 
@@ -166,6 +196,16 @@ export async function loginRequest(email, password) {
   return unwrap(data);
 }
 
+export async function staffLoginRequest(phone, pin) {
+  const { data } = await api.post("/auth/staff-login", { phone, pin });
+  return unwrap(data);
+}
+
+export async function getAuthSession() {
+  const { data } = await api.get("/auth/session");
+  return unwrap(data);
+}
+
 export async function registerRequest(payload) {
   const { data } = await api.post("/auth/register", payload);
   return unwrap(data);
@@ -186,9 +226,58 @@ export async function putProduct(id, body) {
   return unwrap(data);
 }
 
+/** Phase 7.11.4: server lookup by sanitized barcode (requires INVENTORY_COUNT_MODE). */
+export async function getProductByBarcode(code) {
+  const encoded = encodeURIComponent(String(code ?? "").trim());
+  const { data } = await api.get(`/products/barcode/${encoded}`);
+  return unwrap(data);
+}
+
+export async function postInventoryCountFinalize(body) {
+  const { data } = await api.post("/inventory-count/finalize", body);
+  return unwrap(data);
+}
+
+export async function postInventoryCountSessionEvent(body) {
+  const { data } = await api.post("/inventory-count/session-event", body);
+  return unwrap(data);
+}
+
 export async function postTransaction(payload) {
+  if (_ufecFinancialApiDepth === 0 && import.meta.env.DEV) {
+    console.warn("[UFEC_VIOLATION]", "Direct financial call bypass detected: postTransaction");
+  }
   const { data } = await api.post("/transactions", payload, { timeout: 60_000 });
   return unwrap(data);
+}
+
+export async function getTransactions() {
+  const { data } = await api.get("/transactions");
+  return unwrap(data);
+}
+
+/** Server truth: `transaction.id` matches `client_transaction_id` for synced sales (recovery / support). */
+export async function getTransactionByClientId(clientTransactionId) {
+  const { data } = await api.get(`/transactions/${encodeURIComponent(clientTransactionId)}`);
+  return unwrap(data);
+}
+
+/** Manager/admin: return of a paid sale (idempotent client_return_id; optional items for partial qty). */
+export async function postTransactionReturn(body) {
+  if (_ufecFinancialApiDepth === 0 && import.meta.env.DEV) {
+    console.warn("[UFEC_VIOLATION]", "Direct financial call bypass detected: postTransactionReturn");
+  }
+  const { data } = await api.post("/transactions/return", body, { timeout: 60_000 });
+  return unwrap(data);
+}
+
+/** Phase 7.12.1: download PDF with auth (same bytes as public link). */
+export async function downloadTransactionReceiptPdf(transactionId) {
+  const { data } = await api.get(`/transactions/${transactionId}/receipt`, {
+    responseType: "blob",
+    timeout: 60_000,
+  });
+  return data;
 }
 
 export async function getDashboardStats() {
@@ -196,8 +285,14 @@ export async function getDashboardStats() {
   return unwrap(data);
 }
 
+/** Daily Profit Engine — same data as dashboard-stats (net subtotals, COGS, gross & net profit). */
+export async function getAnalyticsDailySummary() {
+  const { data } = await api.get("/analytics/daily-summary");
+  return unwrap(data);
+}
+
 export async function getSettings() {
-  const { data } = await api.get("/settings");
+  const { data } = await api.get("/settings", { skipGlobalToast: true });
   return unwrap(data);
 }
 
@@ -303,6 +398,12 @@ export async function getAdminMonitoringAlerts() {
   return unwrap(data);
 }
 
+/** Phase 7 — control tower: operational mode, resilience snapshot, anomalies, reconciliation backlog. */
+export async function getAdminUfecHealth() {
+  const { data } = await api.get("/api/admin/ufec-health");
+  return unwrap(data);
+}
+
 export async function postAdminAlertTest(payload) {
   const { data } = await api.post("/api/admin/alerts/test", payload ?? {});
   return unwrap(data);
@@ -341,6 +442,21 @@ export async function postCustomer(payload) {
 
 export async function putCustomer(id, payload) {
   const { data } = await api.put(`/customers/${id}`, payload);
+  return unwrap(data);
+}
+
+/** Phase 7.10.1: apply payment against customer credit balance (admin). */
+export async function postSettleCustomerCredit(customerId, payload) {
+  const { data } = await api.post(`/customers/${encodeURIComponent(customerId)}/settle-credit`, payload);
+  return unwrap(data);
+}
+
+/** Settle against a single sale row (admin). */
+export async function postSettleTransactionCredit(transactionId, payload) {
+  const { data } = await api.post(
+    `/transactions/${encodeURIComponent(transactionId)}/settle-credit`,
+    payload
+  );
   return unwrap(data);
 }
 
@@ -443,7 +559,40 @@ export async function getUsageSummary() {
 
 /** Phase 7.5: resolved feature flags for current plan + A/B bucket. */
 export async function getUsageFeatures() {
-  const { data } = await api.get("/usage/features");
+  const { data } = await api.get("/usage/features", { skipGlobalToast: true });
+  return unwrap(data);
+}
+
+/** Phase 7.12.3: log WhatsApp receipt deep-link attempt (observability). */
+export async function postWhatsAppReceiptAttempt(body) {
+  const { data } = await api.post("/usage/whatsapp-receipt-attempt", body);
+  return unwrap(data);
+}
+
+/** Phase 7.10.2: expenses (feature-gated server-side). */
+export async function postExpense(payload) {
+  const { data } = await api.post("/expenses", payload);
+  return unwrap(data);
+}
+
+export async function getExpenses(params) {
+  const { data } = await api.get("/expenses", { params });
+  return unwrap(data);
+}
+
+export async function getDailySummary(params) {
+  const { data } = await api.get("/reports/daily-summary", { params });
+  return unwrap(data);
+}
+
+/** Phase 7.12.4: today’s sales metrics for owner summary (business timezone on Settings). */
+export async function getOwnerDailySummary() {
+  const { data } = await api.get("/reports/owner-daily-summary");
+  return unwrap(data);
+}
+
+export async function getExpenseMeta() {
+  const { data } = await api.get("/expenses/meta");
   return unwrap(data);
 }
 
@@ -469,6 +618,12 @@ export async function getAuditLogs() {
   return unwrap(data);
 }
 
+/** Append-only audit ledger ingest (batch). Actor is server-trusted from JWT. */
+export async function postAuditEventsBulk(payload) {
+  const { data } = await api.post("/audit-events/bulk", payload, { skipGlobalToast: true });
+  return unwrap(data);
+}
+
 export async function triggerBackup() {
   const { data } = await api.post("/backups/trigger");
   return unwrap(data);
@@ -481,6 +636,18 @@ export async function getBackups() {
 
 export async function getRecoveryInfo() {
   const { data } = await api.get("/backups/recovery-info");
+  return unwrap(data);
+}
+
+/** Phase 7.13.3: upload full IndexedDB snapshot (admin). */
+export async function postIndexedDBBackup(snapshot) {
+  const { data } = await api.post("/backups/indexeddb", { snapshot });
+  return unwrap(data);
+}
+
+/** Download backup payload; use `snapshot` for INDEXEDDB restores. */
+export async function downloadBackupPayload(backupId) {
+  const { data } = await api.get(`/backups/${backupId}/download`);
   return unwrap(data);
 }
 
@@ -514,6 +681,21 @@ export async function postStaff(payload) {
   return unwrap(data);
 }
 
+export async function postStaffWhatsAppInvite(payload) {
+  const { data } = await api.post("/staff/invite", payload);
+  return unwrap(data);
+}
+
+export async function getStaffInvitePreview(token) {
+  const { data } = await api.get(`/staff/invite/${encodeURIComponent(token)}`);
+  return unwrap(data);
+}
+
+export async function postAcceptStaffInvite(body) {
+  const { data } = await api.post("/staff/accept-invite", body);
+  return unwrap(data);
+}
+
 export async function disableStaff(id) {
   const { data } = await api.post(`/staff/${id}/disable`);
   return unwrap(data);
@@ -521,6 +703,42 @@ export async function disableStaff(id) {
 
 export async function reactivateStaff(id, payload) {
   const { data } = await api.post(`/staff/${id}/reactivate`, payload);
+  return unwrap(data);
+}
+
+/** Phase 6 admin — financial observability (integrity pipeline). */
+export async function getObservabilitySummary() {
+  const { data } = await api.get("/api/v1/obs/summary");
+  return unwrap(data);
+}
+
+export async function getObservabilityHealth() {
+  const { data } = await api.get("/api/v1/obs/health");
+  return unwrap(data);
+}
+
+export async function getObservabilityAnomalies({ limit, deep } = {}) {
+  const { data } = await api.get("/api/v1/obs/anomalies", {
+    params: { limit, deep: deep ? "1" : undefined },
+  });
+  return unwrap(data);
+}
+
+export async function getObservabilityExplain(clientTransactionId) {
+  const { data } = await api.get(
+    `/api/v1/obs/transactions/${encodeURIComponent(clientTransactionId)}`
+  );
+  return unwrap(data);
+}
+
+/** Phase 6.5 — in-process financial event stream (recent ring buffer). */
+export async function getStreamRecent(params = {}) {
+  const { data } = await api.get("/api/v1/stream/recent", { params });
+  return unwrap(data);
+}
+
+export async function getStreamStats() {
+  const { data } = await api.get("/api/v1/stream/stats");
   return unwrap(data);
 }
 

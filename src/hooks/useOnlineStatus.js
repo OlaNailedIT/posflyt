@@ -6,6 +6,11 @@ export function useOnlineStatus() {
   const setOnline = useOfflineStore((s) => s.setOnline);
   const setNetworkStability = useOfflineStore((s) => s.setNetworkStability);
 
+  /** Align store with the browser on mount (HMR / tab restore can leave a stale flag). */
+  useEffect(() => {
+    setOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+  }, [setOnline]);
+
   useEffect(() => {
     let stabilizeTimer;
     const markTransition = () => {

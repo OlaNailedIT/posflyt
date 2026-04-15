@@ -7,6 +7,7 @@ const { createSession } = require("./sessionService");
 const { issueRefreshToken } = require("./refreshTokenService");
 const { logAudit } = require("./auditService");
 const { sanitizeDisplayName, normalizeEmail } = require("../utils/sanitize");
+const { normalizePhoneDigits } = require("../utils/phone");
 const { logger } = require("../utils/logger");
 
 async function registerOwner({ businessName, name, email, password, userAgent, ipAddress }) {
@@ -139,4 +140,120 @@ async function login({ email, password, userAgent, ipAddress, requestId }) {
   };
 }
 
-module.exports = { registerOwner, login };
+async function staffLogin({ phone, pin, userAgent, ipAddress, requestId }) {
+  const normalized = normalizePhoneDigits(phone);
+  if (!normalized) {
+    const error = new Error("Invalid phone number");
+    error.statusCode = 400;
+    error.code = "INVALID_PHONE";
+    throw error;
+  }
+
+  const user = await prisma.user.findFirst({
+    where: { phone: normalized },
+  });
+  if (!user) {
+    logger.warn(
+      {
+        event: "AUTH_STAFF_LOGIN_FAILED",
+        reason: "UNKNOWN_PHONE",
+        requestId: requestId || null,
+        ip: ipAddress || null,
+      },
+      "staff login failed: unknown phone"
+    );
+    const error = new Error("Invalid phone or PIN");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const valid = await comparePassword(pin, user.password);
+  if (!valid) {
+    await logAudit({
+      businessId: user.businessId,
+      userId: user.id,
+      action: "AUTH_LOGIN_FAILED_INVALID_PASSWORD",
+      metadata: {
+        requestId: requestId || null,
+        ip: ipAddress || null,
+        method: "phone_pin",
+      },
+    });
+    const error = new Error("Invalid phone or PIN");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const subscription = await ensureBusinessSubscription(user.businessId);
+  await ensureOnboarding(user.businessId);
+  const jti = await createSession({ userId: user.id, userAgent, ipAddress });
+  const token = signAuthToken({
+    userId: user.id,
+    businessId: user.businessId,
+    role: user.role,
+    jti,
+  });
+  const refreshToken = await issueRefreshToken(user.id, jti);
+  await logAudit({
+    businessId: user.businessId,
+    userId: user.id,
+    action: "AUTH_LOGIN",
+    metadata: { phone: normalized, requestId: requestId || null, method: "phone_pin" },
+  });
+
+  /** Lets the device verify PIN offline (bcrypt compare) and encrypt bundle locally — same hash as DB password. */
+  const offlineBundle = user.phone
+    ? {
+        staffId: user.id,
+        phone: user.phone,
+        role: user.role,
+        businessId: user.businessId,
+        storeId: null,
+        pinHash: user.password,
+      }
+    : undefined;
+
+  return {
+    token,
+    refreshToken,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      business_id: user.businessId,
+      subscription_plan: subscription.plan,
+      phone: user.phone,
+    },
+    offlineBundle,
+  };
+}
+
+async function getSessionPayload(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      businessId: true,
+      phone: true,
+      email: true,
+    },
+  });
+  if (!user) return null;
+  const subscription = await ensureBusinessSubscription(user.businessId);
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      business_id: user.businessId,
+      subscription_plan: subscription.plan,
+      phone: user.phone,
+    },
+  };
+}
+
+module.exports = { registerOwner, login, staffLogin, getSessionPayload };

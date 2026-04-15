@@ -17,6 +17,8 @@ const ALLOWED_SETTINGS_FIELDS = [
   "businessName",
   "businessEmail",
   "businessPhone",
+  "businessTimeZone",
+  "quickSalesProductIds",
 ];
 
 function sanitizeSettingsPayload(payload = {}) {
@@ -39,7 +41,29 @@ function sanitizeSettingsPayload(payload = {}) {
       typeof payload.businessPhone === "string"
         ? sanitizePlainText(payload.businessPhone, 30)
         : undefined,
+    businessTimeZone:
+      typeof payload.businessTimeZone === "string"
+        ? (() => {
+            const t = payload.businessTimeZone.trim();
+            if (!t) return "UTC";
+            return sanitizePlainText(t, 64);
+          })()
+        : undefined,
+    quickSalesProductIds: sanitizeQuickSalesProductIds(payload.quickSalesProductIds),
   };
+}
+
+/** @returns {string[] | undefined} up to 48 UUIDs */
+function sanitizeQuickSalesProductIds(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const out = [];
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  for (const id of raw) {
+    if (typeof id !== "string" || !uuidRe.test(id)) continue;
+    if (!out.includes(id)) out.push(id);
+    if (out.length >= 48) break;
+  }
+  return out.length ? out : undefined;
 }
 
 function pruneUndefinedFields(payload) {

@@ -88,10 +88,10 @@ export default function OnboardingPage() {
 
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Get started in 3 steps</h1>
+      <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Get started</h1>
       <p className="text-sm text-stone-600 dark:text-stone-400">
-        Follow this 15-minute setup: add 3 products, complete first sale, then review your first-day
-        summary.
+        About 15 minutes: add three products, complete one sale, then check your dashboard. Progress below tracks
+        products and first sale.
       </p>
       <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-900">
         <label className="text-sm font-medium">Quick-start template</label>

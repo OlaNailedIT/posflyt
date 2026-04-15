@@ -25,6 +25,15 @@ const adminApiRoutes = require("./routes/adminApiRoutes");
 const biRoutes = require("./routes/biRoutes");
 const usageRoutes = require("./routes/usageRoutes");
 const marketingRoutes = require("./routes/marketingRoutes");
+const expenseRoutes = require("./routes/expenseRoutes");
+const inventoryCountRoutes = require("./routes/inventoryCountRoutes");
+const eventRoutes = require("./routes/eventRoutes");
+const reconciliationRoutes = require("./routes/reconciliationRoutes");
+const observabilityRoutes = require("./routes/observabilityRoutes");
+const streamRoutes = require("./routes/streamRoutes");
+const chaosRoutes = require("./routes/chaosRoutes");
+const distributedRoutes = require("./routes/distributedRoutes");
+const { getPublicReceipt } = require("./controllers/receiptPublicController");
 const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
 const { attachRequestId } = require("./middlewares/requestId");
 const { attachRequestLogger } = require("./middlewares/requestLogger");
@@ -53,9 +62,12 @@ const { getHealth, getReady } = require("./controllers/healthController");
 
 // Public liveness probe: lightweight; DB check optional for strict orchestrators.
 app.get("/health", getHealth);
+/** Alias when load balancers or dashboards are configured with a path under `/api`. */
+app.get("/api/health", getHealth);
 
 // Readiness: DB required; Redis when REDIS_URL is set (queue/cache).
 app.get("/ready", getReady);
+app.get("/api/ready", getReady);
 
 app.use(
   pinoHttp({
@@ -79,8 +91,27 @@ app.post("/api/payments/webhook/stripe", express.raw({ type: "application/json" 
 app.post("/api/payments/webhook/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
 app.post("/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
 app.post("/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
+/** When payment provider URL is registered as `…/api/billing/webhooks/…` (API base includes `/api`). */
+app.post("/api/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
+app.post("/api/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
 
-app.use(express.json({ limit: "1mb" }));
+/** Phase 7.12.1: public receipt PDF (no auth; token is unguessable). */
+app.get("/receipts/public/:token", getPublicReceipt);
+app.get("/api/receipts/public/:token", getPublicReceipt);
+
+/** Larger JSON body for Phase 7.13.3 IndexedDB cloud backup uploads (admin-only route). */
+function jsonBodyParser(req, res, next) {
+  const url = req.originalUrl || req.url || "";
+  const large =
+    req.method === "POST" &&
+    (url === "/backups/indexeddb" ||
+      url.startsWith("/backups/indexeddb?") ||
+      url === "/api/backups/indexeddb" ||
+      url.startsWith("/api/backups/indexeddb?"));
+  return express.json({ limit: large ? "32mb" : "1mb" })(req, res, next);
+}
+
+app.use(jsonBodyParser);
 app.use(timeoutMiddleware);
 app.use(validateJsonContentType);
 app.use((req, res, next) => {
@@ -110,14 +141,17 @@ app.use(metricsTracker);
 if (nodeEnv !== "production") {
   const debugRoutes = require("./routes/debugRoutes");
   const { requireAuth } = require("./middlewares/auth");
-  const { getSyncDiagnostics } = require("./controllers/debugController");
+  const { getSyncDiagnostics, getTransactionDebug, getExpensesDebug } = require("./controllers/debugController");
   app.use("/debug", debugRoutes);
   app.get("/debug/sync", requireAuth, getSyncDiagnostics);
+  app.get("/debug/transaction/:id", requireAuth, getTransactionDebug);
+  app.get("/debug/expenses", requireAuth, getExpensesDebug);
 }
 
 app.use("/auth", authLimiter);
 app.use("/auth", authRoutes);
 app.use("/products", productRoutes);
+app.use("/inventory-count", inventoryCountRoutes);
 app.use("/transactions", transactionRoutes);
 app.use("/", dashboardRoutes);
 app.use("/", systemRoutes);
@@ -138,8 +172,39 @@ app.use("/api/admin", adminApiRoutes);
 app.use("/api/bi", biRoutes);
 app.use("/", usageRoutes);
 app.use("/", marketingRoutes);
+app.use("/", expenseRoutes);
+/** Phase 4B: integrity event ingest (JWT + tenant-scoped); path prefix matches REST versioning. */
+app.use("/api/v1", eventRoutes);
+app.use("/api/v1", reconciliationRoutes);
+/** Phase 6: admin financial observability (integrity timeline, health, anomalies). */
+app.use("/api/v1", observabilityRoutes);
+/** Phase 6.5: in-process financial event stream (recent buffer + counters). */
+app.use("/api/v1", streamRoutes);
+/** Phase 7: chaos / resilience drills (env-gated; admin-only). */
+app.use("/api/v1", chaosRoutes);
+/** Phase 8: shard routing + derived global view metadata (admin-only). */
+app.use("/api/v1", distributedRoutes);
+
+/**
+ * Controlled `/api/*` aliases — base-path compatibility when `VITE_API_URL` is `https://host/api`
+ * (requests become `/api/products`, not `/products`). Do not duplicate `/api/v1/*`, `/api/admin`, `/api/bi`.
+ * Prefer setting the client base URL to `https://host` with paths as in `src/services/api.js`.
+ */
+app.use("/api/auth", authLimiter);
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/inventory-count", inventoryCountRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api", customerRoutes);
+app.use("/api", settingsRoutes);
+app.use("/api", expenseRoutes);
+/** `/dashboard-stats`, `/analytics/daily-summary` — shell loads these without `/api` in the path string. */
+app.use("/api", dashboardRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
+
+const { registerDefaultSubscribers } = require("./streaming/subscribers/registerDefaultSubscribers");
+registerDefaultSubscribers();
 
 module.exports = app;

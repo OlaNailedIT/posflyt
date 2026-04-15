@@ -11,6 +11,7 @@ let readClient;
 function getReadPrisma() {
   if (!databaseReadUrl) return null;
   if (!readClient) {
+    /** Read replica only — never fall back to DATABASE_URL here. */
     readClient = new PrismaClient({
       datasources: { db: { url: databaseReadUrl } },
     });

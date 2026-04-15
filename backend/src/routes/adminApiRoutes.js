@@ -15,6 +15,7 @@ const {
   getMonitoringAlerts,
   postAlertTest,
 } = require("../controllers/adminOpsController");
+const { getUfecHealth } = require("../controllers/observabilityController");
 
 const router = express.Router();
 
@@ -24,6 +25,9 @@ router.use(adminOpsLimiter);
 router.use(logAdminApiAccess);
 
 /** Read-only monitoring APIs (Phase 7.2). JWT + admin role; requestId in envelope + logs. */
+/** Phase 7 — control tower: UFEC/ops snapshot + anomalies + sync backlog. */
+router.get("/ufec-health", getUfecHealth);
+
 router.get("/transactions", getTransactions);
 router.get("/transactions/:id", getTransactionById);
 router.get("/events", getEvents);

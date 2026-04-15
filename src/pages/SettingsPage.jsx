@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useOfflineStore } from "../stores/offlineStore";
 import { useOfflineSync } from "../hooks/useOfflineSync";
 import { useSettings } from "../hooks/useSettings";
+import { useProducts } from "../hooks/useProducts";
+import { getUsageFeatures } from "../services/api";
 import { useToastStore } from "../stores/toastStore";
 import ExpandableSection from "../components/ui/ExpandableSection";
 import { VALIDATION_MODE } from "../config/productMode";
 import { useReliabilitySummary } from "../hooks/useSystem";
 import { clearAllQueues } from "../services/db";
+import { can } from "../utils/permissions";
+import { useAuthStore } from "../stores/authStore";
 
 const currencyOptions = [
   { code: "USD", symbol: "$" },
@@ -29,11 +34,23 @@ const inputClass =
   "w-full rounded-lg border border-stone-300 bg-stone-50 p-2.5 text-stone-900 placeholder:text-stone-500 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100";
 
 export default function SettingsPage() {
+  const location = useLocation();
   const { data, isLoading, updateSettings, isSaving } = useSettings();
+  const { data: products = [] } = useProducts();
+  const { data: usageFeatures } = useQuery({
+    queryKey: ["usage", "features"],
+    queryFn: getUsageFeatures,
+    staleTime: 60_000,
+  });
+  const role = useAuthStore((s) => s.user?.role);
+  const quickSalesFlagOn = usageFeatures?.flags?.QUICK_SALES_MODE !== false;
+  const canQuickPins = quickSalesFlagOn && can(role, "accessSettings");
+
   const [form, setForm] = useState({
     businessName: "",
     businessEmail: "",
     businessPhone: "",
+    businessTimeZone: "UTC",
     countryCode: "US",
     currencyCode: "USD",
     currencySymbol: "$",
@@ -42,6 +59,7 @@ export default function SettingsPage() {
     taxRules: [{ countryCode: "US", enabled: false, rate: 0 }],
     logoUrl: "",
     receiptLayout: "STANDARD",
+    quickSalesProductIds: [],
   });
   const isOnline = useOfflineStore((s) => s.isOnline);
   const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
@@ -60,11 +78,20 @@ export default function SettingsPage() {
   const showToast = useToastStore((s) => s.showToast);
 
   useEffect(() => {
+    if (location.hash !== "#sync-panel") return;
+    const el = document.getElementById("sync-panel");
+    if (!el) return;
+    const t = window.setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    return () => window.clearTimeout(t);
+  }, [location.hash, location.pathname]);
+
+  useEffect(() => {
     if (!data) return;
     setForm({
       businessName: data.businessName || "",
       businessEmail: data.businessEmail || "",
       businessPhone: data.businessPhone || "",
+      businessTimeZone: data.businessTimeZone || "UTC",
       countryCode: data.countryCode || "US",
       currencyCode: data.currencyCode || "USD",
       currencySymbol: data.currencySymbol || "$",
@@ -75,10 +102,20 @@ export default function SettingsPage() {
         : [{ countryCode: data.countryCode || "US", enabled: Boolean(data.taxEnabled), rate: Number(data.taxRate || 0) }],
       logoUrl: data.logoUrl || "",
       receiptLayout: data.receiptLayout || "STANDARD",
+      quickSalesProductIds: Array.isArray(data.quickSalesProductIds) ? data.quickSalesProductIds : [],
     });
   }, [data]);
 
   const setField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const toggleQuickPin = (productId) => {
+    setForm((f) => {
+      const cur = Array.isArray(f.quickSalesProductIds) ? [...f.quickSalesProductIds] : [];
+      const ix = cur.indexOf(productId);
+      if (ix >= 0) cur.splice(ix, 1);
+      else if (cur.length < 24) cur.push(productId);
+      return { ...f, quickSalesProductIds: cur };
+    });
+  };
   const onLogoUpload = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -115,7 +152,9 @@ export default function SettingsPage() {
         ...form,
         taxRate: Number(form.taxRate || 0),
         businessPhone: form.businessPhone || "",
+        businessTimeZone: form.businessTimeZone?.trim() || "UTC",
         taxRules: form.taxRules,
+        quickSalesProductIds: form.quickSalesProductIds?.length ? form.quickSalesProductIds : undefined,
       });
       showToast("Settings updated.", "success");
     } catch (error) {
@@ -130,12 +169,31 @@ export default function SettingsPage() {
   };
   const syncSummary = `POSflyt Sync Update: Pending ${pendingTransactions}, Failed ${failedTransactions}, Duplicates prevented ${reliability?.failureCohorts?.byCode?.DUPLICATE_ID || 0}, Last synced ${lastSuccessfulSyncAt != null ? new Date(lastSuccessfulSyncAt).toLocaleString() : lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString() : "Not yet"}, Reconciliation: ${reliability?.lastReconciliationStatus || "Unknown"}.`;
 
+  const dataSafetyLine =
+    pendingTransactions === 0 && failedTransactions === 0
+      ? "All caught up — completed sales are sent to the cloud when you are online."
+      : failedTransactions > 0
+        ? `${failedTransactions} sale(s) need attention before they sync. Use Sync below.`
+        : `${pendingTransactions} sale(s) waiting to sync — they stay safely on this device until sent.`;
+
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100">Settings</h1>
       <p className="text-sm text-stone-600 dark:text-stone-400">
         Keep your business data consistent, stock accurate, and sync recoverable in low-internet conditions.
       </p>
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/95 p-4 text-sm text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-100">
+        <h2 className="font-semibold text-emerald-900 dark:text-emerald-100">Data safety</h2>
+        <p className="mt-1">{dataSafetyLine}</p>
+        <p className="mt-2 text-xs text-emerald-800/90 dark:text-emerald-200/90">
+          Last successful sync:{" "}
+          {lastSuccessfulSyncAt != null
+            ? new Date(lastSuccessfulSyncAt).toLocaleString()
+            : lastSyncedAt
+              ? new Date(lastSyncedAt).toLocaleString()
+              : "Not yet"}
+        </p>
+      </div>
       {isLoading && <p className="text-sm text-stone-500 dark:text-stone-400">Loading settings...</p>}
       <form
         onSubmit={onSubmit}
@@ -168,7 +226,26 @@ export default function SettingsPage() {
               value={form.businessPhone}
               onChange={(e) => setField("businessPhone", e.target.value)}
             />
+            <input
+              className={`${inputClass} sm:col-span-2`}
+              placeholder="Time zone (IANA), e.g. Africa/Lagos or UTC"
+              value={form.businessTimeZone}
+              onChange={(e) => setField("businessTimeZone", e.target.value)}
+              title="Used for “today” in daily owner summary and reporting"
+            />
           </div>
+          <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
+            Business phone: WhatsApp-ready with country code (digits). Time zone:{" "}
+            <a
+              href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+              className="text-teal-700 underline dark:text-teal-400"
+              target="_blank"
+              rel="noreferrer"
+            >
+              IANA name
+            </a>{" "}
+            for “today” (daily summary).
+          </p>
         </div>
 
         <div>
@@ -258,7 +335,30 @@ export default function SettingsPage() {
           {VALIDATION_MODE && <p className="mt-2 text-xs">Coming later.</p>}
         </ExpandableSection>
 
-        <div>
+        {canQuickPins && (
+          <ExpandableSection title="Quick sale — pinned products" className="mt-1">
+            <p className="text-xs text-stone-600 dark:text-stone-400">
+              Up to 24 products listed first on the Quick sale screen. Order follows your selection order.
+            </p>
+            <div className="mt-3 max-h-60 space-y-2 overflow-y-auto rounded-lg border border-stone-200 p-2 dark:border-stone-700">
+              {products.length === 0 && (
+                <p className="text-sm text-stone-500">Add products in Inventory first.</p>
+              )}
+              {products.slice(0, 200).map((p) => (
+                <label key={p.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.quickSalesProductIds?.includes(p.id))}
+                    onChange={() => toggleQuickPin(p.id)}
+                  />
+                  <span className="truncate">{p.name}</span>
+                </label>
+              ))}
+            </div>
+          </ExpandableSection>
+        )}
+
+        <div id="sync-panel">
           <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Offline Control Panel</h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
             Use Sync Now to send queued offline sales and other pending changes when internet is available.

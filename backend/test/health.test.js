@@ -12,3 +12,10 @@ test("GET /health returns ok", async () => {
   assert.equal(res.body.data.status, "ok");
   assert.ok(typeof res.body.data.uptimeSeconds === "number" && res.body.data.uptimeSeconds >= 0);
 });
+
+test("GET /api/health matches GET /health (API prefix alias)", async () => {
+  const res = await request(app).get("/api/health");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "ok");
+  assert.equal(res.body.data.service, "posflyt-backend");
+});

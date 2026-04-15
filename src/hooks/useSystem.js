@@ -8,6 +8,7 @@ import {
   getReliabilitySummary,
   getSystemHealth,
   postAdminDailyClose,
+  postIndexedDBBackup,
   reportIssue,
   triggerBackup,
 } from "../services/api";
@@ -52,6 +53,7 @@ export function useAdminDailyClose(enabled = true) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin-daily-close"] });
       qc.invalidateQueries({ queryKey: ["reliability-summary"] });
+      qc.invalidateQueries({ queryKey: ["reports", "owner-daily-summary"] });
     },
   });
   return { ...query, confirmDailyClose: confirm };
@@ -94,6 +96,14 @@ export function useTriggerBackup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: triggerBackup,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["backups"] }),
+  });
+}
+
+export function usePostIndexedDBBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: postIndexedDBBackup,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backups"] }),
   });
 }

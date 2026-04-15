@@ -29,6 +29,14 @@ function defaultRange() {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
+function transactionPaymentLabel(status) {
+  const u = String(status || "").toUpperCase();
+  if (u === "PAID") return "PAID ✅";
+  if (u === "PARTIAL") return "PARTIAL ⚠️";
+  if (u === "CREDIT") return "CREDIT 🔴";
+  return status || "—";
+}
+
 function fmtBucket(v) {
   if (v == null) return "";
   const d = v instanceof Date ? v : new Date(v);
@@ -509,6 +517,7 @@ export default function BiDashboardPage() {
               <tr>
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Total</th>
+                <th className="px-3 py-2">Payment</th>
                 <th className="px-3 py-2">Sync</th>
                 <th className="px-3 py-2">When</th>
                 <th className="px-3 py-2">Customer</th>
@@ -524,8 +533,9 @@ export default function BiDashboardPage() {
                   <td className="px-3 py-2 font-mono text-xs">{r.id}</td>
                   <td className="px-3 py-2">
                     {sym}
-                    {r.total}
+                    {r.totalAmount ?? r.total}
                   </td>
+                  <td className="px-3 py-2 text-xs">{transactionPaymentLabel(r.paymentStatus)}</td>
                   <td className="px-3 py-2">{r.syncStatus}</td>
                   <td className="px-3 py-2">{new Date(r.createdAt).toLocaleString()}</td>
                   <td className="px-3 py-2 text-xs">{r.customer?.name || "—"}</td>

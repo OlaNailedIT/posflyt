@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useStaff } from "../hooks/useStaff";
 import { useToastStore } from "../stores/toastStore";
+import { postStaffWhatsAppInvite } from "../services/api";
 
 const emptyForm = {
   name: "",
@@ -10,13 +12,32 @@ const emptyForm = {
   role: "CASHIER",
 };
 
+const emptyInvite = {
+  fullName: "",
+  phone: "",
+  role: "CASHIER",
+};
+
 const inputClass =
   "w-full rounded-lg border border-stone-300 bg-stone-50 p-2.5 text-stone-900 placeholder:text-stone-500 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100";
 
 export default function StaffPage() {
+  const queryClient = useQueryClient();
   const [form, setForm] = useState(emptyForm);
+  const [inviteForm, setInviteForm] = useState(emptyInvite);
+  const [lastInvite, setLastInvite] = useState(null);
   const { data: staff = [], isLoading, addStaff, disableStaffMember, reactivateStaffMember } = useStaff();
   const showToast = useToastStore((s) => s.showToast);
+
+  const inviteMutation = useMutation({
+    mutationFn: postStaffWhatsAppInvite,
+    onSuccess: (data) => {
+      setLastInvite(data);
+      setInviteForm(emptyInvite);
+      void queryClient.invalidateQueries({ queryKey: ["staff"] });
+      showToast("Invite created. Open WhatsApp to send the link.", "success");
+    },
+  });
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -36,6 +57,78 @@ export default function StaffPage() {
       <p className="text-sm text-stone-600 dark:text-stone-400">
         Add cashiers or managers for this business.
       </p>
+
+      <section className="rounded-xl border border-teal-200 bg-teal-50/80 p-4 shadow-sm dark:border-teal-800 dark:bg-teal-950/30">
+        <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
+          WhatsApp invite (recommended)
+        </h2>
+        <p className="mt-1 text-xs text-stone-600 dark:text-stone-400">
+          Staff opens the link on their phone, sets a PIN, then signs in with phone + PIN — no email password.
+        </p>
+        <form
+          className="mt-3 grid gap-3 md:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            inviteMutation.mutate({
+              fullName: inviteForm.fullName.trim(),
+              phone: inviteForm.phone.trim(),
+              role: inviteForm.role,
+            });
+          }}
+        >
+          <input
+            className={inputClass}
+            placeholder="Full name"
+            value={inviteForm.fullName}
+            onChange={(e) => setInviteForm((p) => ({ ...p, fullName: e.target.value }))}
+            required
+          />
+          <input
+            className={inputClass}
+            placeholder="Phone (e.g. 2348012345678)"
+            inputMode="tel"
+            value={inviteForm.phone}
+            onChange={(e) => setInviteForm((p) => ({ ...p, phone: e.target.value }))}
+            required
+          />
+          <select
+            className={inputClass}
+            value={inviteForm.role}
+            onChange={(e) => setInviteForm((p) => ({ ...p, role: e.target.value }))}
+          >
+            <option value="CASHIER">Cashier</option>
+            <option value="MANAGER">Manager</option>
+          </select>
+          <button
+            type="submit"
+            disabled={inviteMutation.isPending}
+            className="rounded-lg bg-teal-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 dark:bg-teal-500 dark:text-stone-950"
+          >
+            {inviteMutation.isPending ? "Creating…" : "Create invite & WhatsApp"}
+          </button>
+        </form>
+        {inviteMutation.isError && (
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {inviteMutation.error?.response?.data?.message || "Could not create invite."}
+          </p>
+        )}
+        {lastInvite?.whatsappUrl && (
+          <div className="mt-3 rounded-lg border border-stone-200 bg-white p-3 text-sm dark:border-stone-600 dark:bg-stone-900">
+            <p className="font-medium text-stone-800 dark:text-stone-200">Send via WhatsApp</p>
+            <a
+              href={lastInvite.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex rounded-lg bg-[#25D366] px-4 py-2.5 font-semibold text-white"
+            >
+              Open WhatsApp
+            </a>
+            <p className="mt-2 break-all text-xs text-stone-500 dark:text-stone-400">
+              Link: {lastInvite.inviteUrl}
+            </p>
+          </div>
+        )}
+      </section>
 
       <form
         onSubmit={onSubmit}
@@ -86,6 +179,9 @@ export default function StaffPage() {
 
       <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
         <h2 className="text-lg font-semibold">Team members</h2>
+        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+          Phone shown for WhatsApp-invited staff; email for classic accounts.
+        </p>
         {isLoading && <p className="mt-2 text-sm text-stone-500">Loading staff...</p>}
         {!isLoading && !staff.length && (
           <p className="mt-2 text-sm text-stone-500">
@@ -100,7 +196,13 @@ export default function StaffPage() {
                 className="rounded-lg border border-stone-200 px-3 py-2 text-sm dark:border-stone-700"
               >
                 <p className="font-medium">{member.name}</p>
-                <p className="text-stone-500">{member.email}</p>
+                <p className="text-stone-500">
+                  {member.phone ? (
+                    <span className="font-mono">+{String(member.phone).replace(/^\+/, "")}</span>
+                  ) : null}
+                  {member.phone ? " · " : ""}
+                  {member.email}
+                </p>
                 <p className="text-xs text-teal-700 dark:text-teal-400">
                   {member.role} · {member.isDisabled ? "Disabled" : "Active"} · Added{" "}
                   {new Date(member.createdAt).toLocaleDateString()}

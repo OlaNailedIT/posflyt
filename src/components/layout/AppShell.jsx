@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import RouteLoadingFallback from "../routing/RouteLoadingFallback.jsx";
+import SmartAlertsBell from "../SmartAlertsBell";
+import { useNotificationStore } from "../../stores/notificationStore";
 import { useAuthStore } from "../../stores/authStore";
+import { getUsageFeatures } from "../../services/api";
 import { useOfflineStore } from "../../stores/offlineStore";
 import ThemeToggle from "../ThemeToggle";
 import SystemHealthBadge from "../SystemHealthBadge";
@@ -11,11 +16,18 @@ import { clearSessionCookie } from "../../services/authRefresh";
 import { useToastStore } from "../../stores/toastStore";
 import { CORE_POSITIONING, VALIDATION_MODE } from "../../config/productMode";
 import ConflictResolutionHost from "../ConflictResolutionHost";
-import SyncDebugPanel from "../SyncDebugPanel";
 import QuotaBanner from "../QuotaBanner";
+import SyncGlobalBanner from "../SyncGlobalBanner";
+import SyncPersistentFailureBanner from "../SyncPersistentFailureBanner";
+import AppRouteErrorBoundary from "../AppRouteErrorBoundary";
 
 export default function AppShell() {
   const location = useLocation();
+  const { data: usageFeatures } = useQuery({
+    queryKey: ["usage", "features"],
+    queryFn: getUsageFeatures,
+    staleTime: 60_000,
+  });
   const clearAuth = useAuthStore((s) => s.logout);
 
   const performLogout = async () => {
@@ -23,10 +35,13 @@ export default function AppShell() {
     clearAuth();
   };
   const role = useAuthStore((s) => s.user?.role);
+  const isCashier = role === "CASHIER";
   const plan = useAuthStore((s) => s.user?.subscription_plan || "FREE");
   const isOnline = useOfflineStore((s) => s.isOnline);
   const pendingTransactions = useOfflineStore((s) => s.pendingTransactions);
   const failedTransactions = useOfflineStore((s) => s.failedTransactions);
+  const lastSyncError = useOfflineStore((s) => s.lastSyncError);
+  const updateSyncFailureAlert = useNotificationStore((s) => s.updateSyncFailureAlert);
   const networkStability = useOfflineStore((s) => s.networkStability);
   const syncing = useOfflineStore((s) => s.syncing);
   const syncProgress = useOfflineStore((s) => s.syncProgress);
@@ -35,15 +50,29 @@ export default function AppShell() {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const desktopMoreRef = useRef(null);
 
-  const primaryLinks = [
-    { to: "/dashboard", label: "Dashboard" },
-    { to: "/pos", label: "POS" },
-    { to: "/inventory", label: "Inventory" },
-  ];
+  const primaryLinks = isCashier
+    ? [
+        { to: "/pos", label: "POS" },
+        { to: "/dashboard", label: "Home" },
+        ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick sale" }] : []),
+        { to: "/inventory", label: "Inventory" },
+        ...(can(role, "processReturns") ? [{ to: "/returns", label: "Returns" }] : []),
+      ]
+    : [
+        { to: "/dashboard", label: "Dashboard" },
+        { to: "/pos", label: "POS" },
+        ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick sale" }] : []),
+        { to: "/inventory", label: "Inventory" },
+        ...(usageFeatures?.flags?.INVENTORY_COUNT_MODE !== false && can(role, "editProducts")
+          ? [{ to: "/inventory/count", label: "Count" }]
+          : []),
+        ...(can(role, "processReturns") ? [{ to: "/returns", label: "Returns" }] : []),
+      ];
   const secondaryLinks = [
     { to: "/customers", label: "Customers" },
-    { to: "/usage", label: "Usage" },
-    { to: "/onboarding", label: "Onboarding" },
+    ...(isCashier ? [] : usageFeatures?.flags?.EXPENSES ? [{ to: "/expenses", label: "Expenses" }] : []),
+    ...(isCashier ? [] : [{ to: "/usage", label: "Usage" }]),
+    ...(isCashier ? [] : [{ to: "/onboarding", label: "Onboarding" }]),
     ...(can(role, "accessSettings") ? [{ to: "/settings", label: "Settings" }] : []),
     ...(role === "ADMIN" ? [{ to: "/staff", label: "Staff" }] : []),
     ...(!VALIDATION_MODE && can(role, "viewReports") && plan !== "FREE" ? [{ to: "/reports", label: "Reports" }] : []),
@@ -51,27 +80,50 @@ export default function AppShell() {
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/billing", label: "Billing" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/audit-logs", label: "Audit Logs" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/monitoring", label: "Monitoring" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/system", label: "System" }] : []),
+    ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/financial-ops", label: "Financial ops" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/admin/growth", label: "Growth KPIs" }] : []),
     ...(!VALIDATION_MODE && role === "ADMIN" ? [{ to: "/backups", label: "Backups" }] : []),
     { to: "/help", label: "Help" },
   ];
-  const mobilePrimaryLinks = [
-    { to: "/dashboard", label: "Home", icon: "🏠" },
-    { to: "/pos", label: "POS", icon: "🛒" },
-    { to: "/inventory", label: "Stock", icon: "📦" },
-  ];
+  const mobilePrimaryLinks = isCashier
+    ? [
+        { to: "/pos", label: "POS", icon: "🛒" },
+        { to: "/dashboard", label: "Home", icon: "🏠" },
+        ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick", icon: "⚡" }] : []),
+        { to: "/inventory", label: "Stock", icon: "📦" },
+        ...(can(role, "processReturns") ? [{ to: "/returns", label: "Returns", icon: "↩️" }] : []),
+      ]
+    : [
+        { to: "/dashboard", label: "Home", icon: "🏠" },
+        { to: "/pos", label: "POS", icon: "🛒" },
+        ...(usageFeatures?.flags?.QUICK_SALES_MODE !== false ? [{ to: "/pos/quick", label: "Quick", icon: "⚡" }] : []),
+        { to: "/inventory", label: "Stock", icon: "📦" },
+        ...(usageFeatures?.flags?.INVENTORY_COUNT_MODE !== false && can(role, "editProducts")
+          ? [{ to: "/inventory/count", label: "Count", icon: "🔢" }]
+          : []),
+        ...(can(role, "processReturns") ? [{ to: "/returns", label: "Returns", icon: "↩️" }] : []),
+      ];
   const businessLinks = secondaryLinks.filter((l) =>
-    ["/customers", "/onboarding", "/settings", "/staff"].includes(l.to)
+    ["/customers", "/expenses", "/onboarding", "/settings", "/staff"].includes(l.to)
   );
   const systemLinks = secondaryLinks.filter((l) => ["/help"].includes(l.to));
   const adminLinks = secondaryLinks.filter((l) =>
-    ["/reports", "/bi", "/billing", "/audit-logs", "/backups", "/admin/monitoring", "/admin/growth"].includes(l.to)
+      ["/reports", "/bi", "/billing", "/audit-logs", "/backups", "/admin/monitoring", "/admin/system", "/admin/financial-ops", "/admin/growth"].includes(l.to)
   );
 
   useEffect(() => {
     setDesktopMoreOpen(false);
     setMobileMoreOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [location.pathname]);
+
+  useEffect(() => {
+    updateSyncFailureAlert(failedTransactions, lastSyncError);
+  }, [failedTransactions, lastSyncError, updateSyncFailureAlert]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -99,7 +151,7 @@ export default function AppShell() {
       <QuotaBanner />
       <header className="border-b border-stone-200 bg-white/90 backdrop-blur dark:border-stone-800 dark:bg-stone-900/90">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <Link to="/dashboard" className="text-lg font-bold text-teal-800 dark:text-teal-400">
+          <Link to={isCashier ? "/pos" : "/dashboard"} className="text-lg font-bold text-teal-800 dark:text-teal-400">
             POSflyt
           </Link>
           <nav className="hidden flex-wrap gap-2 md:flex">
@@ -107,6 +159,7 @@ export default function AppShell() {
               <NavLink
                 key={link.to}
                 to={link.to}
+                end={link.to === "/pos" || link.to === "/inventory"}
                 className={({ isActive }) =>
                   `rounded-lg px-3 py-1.5 text-sm font-medium transition ${isActive ? "bg-teal-600 text-white dark:bg-teal-500 dark:text-stone-950" : "bg-stone-200/90 text-stone-800 hover:bg-stone-300 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"}`
                 }
@@ -191,18 +244,37 @@ export default function AppShell() {
             </div>
           </nav>
           <div className="flex flex-wrap items-center gap-2">
-            <SystemHealthBadge />
+            {!isCashier ? <SystemHealthBadge /> : null}
             <SyncStatusIndicator />
-            <div className="rounded-lg border border-stone-300 bg-stone-100 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300">
-              Plan: {plan} · {isOnline ? "Online" : "Offline"}
-              {syncing ? " · Syncing" : ""}
-              {pendingTransactions ? ` · Queue: ${pendingTransactions}` : ""}
-              {failedTransactions ? ` · Failed: ${failedTransactions}` : ""}
-              {failedTransactions > 0 ? " · Action needed" : ""}
-              {networkStability === "transitioning" ? " · Connection stabilizing" : ""}
-              {syncing && syncProgress.total
-                ? ` · Progress: ${syncProgress.done}/${syncProgress.total}`
-                : ""}
+            <SmartAlertsBell />
+            <div
+              className={`rounded-lg border border-stone-300 bg-stone-100 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-300 ${isCashier ? "max-w-[14rem] truncate sm:max-w-none" : ""}`}
+              title={
+                isCashier
+                  ? `${isOnline ? "Online" : "Offline"}${syncing ? " · Syncing" : ""}${pendingTransactions ? ` · Queue ${pendingTransactions}` : ""}${failedTransactions ? ` · Failed ${failedTransactions}` : ""}`
+                  : undefined
+              }
+            >
+              {isCashier ? (
+                <>
+                  {isOnline ? "Online" : "Offline"}
+                  {syncing ? " · Syncing" : ""}
+                  {pendingTransactions ? ` · Q:${pendingTransactions}` : ""}
+                  {failedTransactions ? ` · Fail:${failedTransactions}` : ""}
+                </>
+              ) : (
+                <>
+                  Plan: {plan} · {isOnline ? "Online" : "Offline"}
+                  {syncing ? " · Syncing" : ""}
+                  {pendingTransactions ? ` · Queue: ${pendingTransactions}` : !failedTransactions ? " · No local queue" : ""}
+                  {failedTransactions ? ` · Failed: ${failedTransactions}` : ""}
+                  {failedTransactions > 0 ? " · Action needed" : ""}
+                  {networkStability === "transitioning" ? " · Connection stabilizing" : ""}
+                  {syncing && syncProgress.total
+                    ? ` · Progress: ${syncProgress.done}/${syncProgress.total}`
+                    : ""}
+                </>
+              )}
             </div>
             <ThemeToggle />
             <button
@@ -230,13 +302,20 @@ export default function AppShell() {
           </div>
         </div>
       </header>
+      <SyncGlobalBanner />
+      <SyncPersistentFailureBanner />
       <main className="mx-auto max-w-7xl px-4 py-6">
-        <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
-          {CORE_POSITIONING}
-        </div>
-        <Outlet />
+        {!isCashier ? (
+          <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900 dark:border-teal-800 dark:bg-teal-900/20 dark:text-teal-300">
+            {CORE_POSITIONING}
+          </div>
+        ) : null}
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <AppRouteErrorBoundary>
+            <Outlet />
+          </AppRouteErrorBoundary>
+        </Suspense>
         <ConflictResolutionHost />
-        {import.meta.env.DEV && <SyncDebugPanel />}
       </main>
       {mobileMoreOpen && (
         <div
@@ -313,6 +392,7 @@ export default function AppShell() {
           <NavLink
             key={link.to}
             to={link.to}
+            end={link.to === "/pos" || link.to === "/inventory"}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center rounded-lg py-1 text-[11px] ${isActive ? "bg-teal-600 text-white dark:bg-teal-500 dark:text-stone-950" : "text-stone-700 dark:text-stone-300"}`
             }

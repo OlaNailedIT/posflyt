@@ -4,18 +4,21 @@ const MAP = {
     viewReports: true,
     accessSettings: true,
     viewStaffAnalytics: true,
+    processReturns: true,
   },
   MANAGER: {
     editProducts: true,
     viewReports: true,
     accessSettings: false,
     viewStaffAnalytics: true,
+    processReturns: true,
   },
   CASHIER: {
     editProducts: false,
     viewReports: false,
     accessSettings: false,
     viewStaffAnalytics: false,
+    processReturns: false,
   },
 };
 

@@ -1,6 +1,6 @@
 const express = require("express");
 const { requireAuth } = require("../middlewares/auth");
-const { requireAdmin } = require("../middlewares/role");
+const { requireAdmin, requireAdminOrManager } = require("../middlewares/role");
 const {
   getAdminMetrics,
   getAdminSalesFeed,
@@ -24,7 +24,7 @@ router.get("/admin/payments-query", requireAuth, requireAdmin, getAdminPaymentsQ
 router.post("/admin/payment-retries/run", requireAuth, requireAdmin, postAdminPaymentRetriesRun);
 router.get("/admin/payments/reconcile", requireAuth, requireAdmin, getPaymentsReconcile);
 router.post("/admin/payments/reconcile/apply", requireAuth, requireAdmin, postPaymentsReconcileApply);
-router.get("/admin/daily-close", requireAuth, requireAdmin, getAdminDailyCloseStatus);
-router.post("/admin/daily-close", requireAuth, requireAdmin, postAdminDailyClose);
+router.get("/admin/daily-close", requireAuth, requireAdminOrManager, getAdminDailyCloseStatus);
+router.post("/admin/daily-close", requireAuth, requireAdminOrManager, postAdminDailyClose);
 
 module.exports = router;

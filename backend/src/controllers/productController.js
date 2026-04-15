@@ -1,21 +1,33 @@
 const { z } = require("zod");
-const { listProducts, createProduct, updateProduct } = require("../services/productService");
+const {
+  listProducts,
+  createProduct,
+  updateProduct,
+  findProductByBarcode,
+} = require("../services/productService");
 const { sendOk, sendError } = require("../utils/http");
+const { ensureBusinessSubscription } = require("../services/subscriptionService");
+const { isFeatureEnabled } = require("../services/featureFlagService");
 
-const createSchema = z
+const productBodySchema = z
   .object({
     id: z.string().uuid().optional(),
     name: z.string().min(2),
     price: z.coerce.number().nonnegative(),
     costPrice: z.coerce.number().nonnegative().optional(),
     sellingPrice: z.coerce.number().nonnegative().optional(),
-    stock: z.coerce.number().int().nonnegative(),
-    lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
+    unitType: z.enum(["unit", "kg", "litre"]).optional(),
+    pricePerUnit: z.coerce.number().nonnegative().optional().nullable(),
+    stock: z.coerce.number().nonnegative(),
+    lowStockThreshold: z.union([z.coerce.number().nonnegative(), z.null()]).optional(),
     barcode: z.string().min(3).optional(),
   })
   .strict();
 
-const updateSchema = createSchema.partial().extend({
+/** Measured-product rules enforced in productService; Zod v4 disallows .partial() on refined objects. */
+const createSchema = productBodySchema;
+
+const updateSchema = productBodySchema.partial().extend({
   lastKnownUpdatedAt: z
     .string()
     .min(1, "lastKnownUpdatedAt is required")
@@ -26,6 +38,39 @@ const updateSchema = createSchema.partial().extend({
 async function getProducts(req, res, next) {
   try {
     const data = await listProducts(req.auth.businessId);
+    return sendOk(res, data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getProductByBarcode(req, res, next) {
+  try {
+    const sub = await ensureBusinessSubscription(req.auth.businessId);
+    const allowed = await isFeatureEnabled(req.auth.businessId, sub.plan, "INVENTORY_COUNT_MODE");
+    if (!allowed) {
+      return sendError(res, {
+        statusCode: 403,
+        code: "FEATURE_DISABLED",
+        message: "Inventory count mode is not enabled for this workspace",
+        location: "controllers/productController.getProductByBarcode",
+      });
+    }
+    let raw = req.params.code;
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      raw = req.params.code;
+    }
+    const data = await findProductByBarcode(req.auth.businessId, raw);
+    if (!data) {
+      return sendError(res, {
+        statusCode: 404,
+        code: "NOT_FOUND",
+        message: "No product with this barcode",
+        location: "controllers/productController.getProductByBarcode",
+      });
+    }
     return sendOk(res, data);
   } catch (error) {
     return next(error);
@@ -70,4 +115,4 @@ async function putProduct(req, res, next) {
   }
 }
 
-module.exports = { getProducts, postProduct, putProduct };
+module.exports = { getProducts, getProductByBarcode, postProduct, putProduct };

@@ -1,6 +1,8 @@
 const { z } = require("zod");
 const { getSalesReport } = require("../services/reportService");
+const { getOwnerDailySummary } = require("../services/ownerDailySummaryService");
 const { sendOk, sendError } = require("../utils/http");
+const { logger } = require("../utils/logger");
 
 const querySchema = z
   .object({
@@ -30,4 +32,23 @@ async function getSales(req, res, next) {
   }
 }
 
-module.exports = { getSales };
+async function getOwnerDailySummaryHandler(req, res, next) {
+  try {
+    const data = await getOwnerDailySummary(req.auth.businessId);
+    logger.info(
+      {
+        event: "OWNER_DAILY_SUMMARY_VIEWED",
+        businessId: req.auth.businessId,
+        dateKey: data.dateKey,
+        totalSales: data.totalSales,
+        transactions: data.transactions,
+      },
+      "owner daily summary metrics fetched"
+    );
+    return sendOk(res, data);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { getSales, getOwnerDailySummaryHandler };

@@ -25,7 +25,8 @@ CI provisions a **second** database on the same ephemeral Postgres service (`sha
 
 ```bash
 cd backend
-export SHADOW_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/shadow_posflyt?schema=public"
+# Use CI-style credentials only on an ephemeral/local Postgres — never production.
+export SHADOW_DATABASE_URL="postgresql://<USER>:<PASSWORD>@localhost:5432/<SHADOW_DB_NAME>?schema=public"
 npm run prisma:drift-check
 ```
 

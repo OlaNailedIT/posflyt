@@ -14,7 +14,7 @@ export function loginErrorMessage(err, fallback = "Could not sign in.") {
   const message = err.response?.data?.message;
   let out = fallback;
   if (code === "VALIDATION_FAILED") out = message || "Please check your email and password.";
-  else if (status === 401) out = "Invalid email or password.";
+  else if (status === 401) out = message || "Invalid email or password.";
   else if (message && status && status < 500) out = message;
   return withDevRequestRef(out, err);
 }

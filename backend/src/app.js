@@ -200,6 +200,8 @@ app.use("/api", settingsRoutes);
 app.use("/api", expenseRoutes);
 /** `/dashboard-stats`, `/analytics/daily-summary` — shell loads these without `/api` in the path string. */
 app.use("/api", dashboardRoutes);
+/** `/audit-events/bulk`, `/audit-logs` — offline sync audit ingest when `VITE_API_URL` ends with `/api`. */
+app.use("/api", auditRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

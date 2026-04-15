@@ -49,6 +49,7 @@ const expectedRouterMounts = [
   ["/api", "settingsRoutes"],
   ["/api", "expenseRoutes"],
   ["/api", "dashboardRoutes"],
+  ["/api", "auditRoutes"],
 ];
 
 /** Dev-only mounts (still present in source; counted when validating app.js text). */

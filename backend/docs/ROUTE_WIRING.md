@@ -35,6 +35,7 @@ We **do not** duplicate every router under `/api` (avoids silent drift). Aliases
 | `app.use("/api", settingsRoutes)` | `/settings` |
 | `app.use("/api", expenseRoutes)` | `/expenses`, `/expenses/meta` |
 | `app.use("/api", dashboardRoutes)` | `/dashboard-stats`, `/analytics/daily-summary` |
+| `app.use("/api", auditRoutes)` | `/audit-events/bulk`, `/audit-logs` |
 
 **Not duplicated under `/api`:** admin, billing, reports, backup, staff, analytics, etc. Fix the client base URL or add a **narrow** alias only when a real caller requires it.
 

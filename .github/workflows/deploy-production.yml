@@ -1,3 +1,4 @@
+# Phase 6.5 — manual production promotion (environment approval) + optional rollback hook.
 name: Deploy Production
 
 on:
@@ -14,6 +15,10 @@ on:
         description: "Release tag for rollback (required when action=rollback)"
         required: false
         type: string
+
+concurrency:
+  group: posflyt-production-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: write

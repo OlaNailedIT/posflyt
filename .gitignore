@@ -15,6 +15,8 @@ dist-ssr
 
 # Secrets (keep .env.example tracked if you add one)
 **/.env
+# Optional local CI override (never commit secrets)
+**/.env.ci
 
 # Editor directories and files
 .vscode/*
@@ -26,3 +28,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+# =========================
+# CRITICAL SAFETY EXCLUSIONS
+# =========================
+
+# backups (DO NOT COMMIT)
+backend/backups/
+backend/data/
+
+# environment files (DO NOT COMMIT ANY ENV)
+.env.*
+backend/.env.*
+
+# local development noise
+*.log

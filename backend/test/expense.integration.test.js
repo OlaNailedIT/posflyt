@@ -85,10 +85,11 @@ test("create expense and see it in daily summary", async () => {
   assert.equal(summary.body.data.totalExpenses, 5000);
   assert.equal(summary.body.data.totalSales, 0);
   assert.equal(summary.body.data.profit, -5000);
-  assert.equal(summary.body.data.grossProfit, -5000);
+  assert.equal(summary.body.data.grossProfit, 0);
   assert.equal(summary.body.data.dailyProfit, -5000);
+  assert.equal(summary.body.data.netProfit, -5000);
   assert.equal(summary.body.data.date, dayStart.toISOString().slice(0, 10));
-  assert.equal(summary.body.data.profitType, "gross");
+  assert.equal(summary.body.data.profitType, "net");
 });
 
 test("multiple expenses aggregate in summary", async () => {
@@ -114,8 +115,9 @@ test("multiple expenses aggregate in summary", async () => {
     });
   assert.equal(summary.status, 200);
   assert.equal(summary.body.data.totalExpenses, 7000);
-  assert.equal(summary.body.data.grossProfit, -7000);
+  assert.equal(summary.body.data.grossProfit, 0);
   assert.equal(summary.body.data.dailyProfit, -7000);
+  assert.equal(summary.body.data.netProfit, -7000);
 });
 
 test("daily summary: multi-day range has date null and dateFrom/dateTo set", async () => {
@@ -245,19 +247,22 @@ test("gross profit: sales 100k minus expenses 30k equals 70k", async () => {
   assert.equal(summary.body.data.totalSales, 100000);
   assert.equal(summary.body.data.totalExpenses, 30000);
   assert.equal(summary.body.data.profit, 70000);
-  assert.equal(summary.body.data.grossProfit, 70000);
+  assert.equal(summary.body.data.grossProfit, 100000);
+  assert.equal(summary.body.data.netProfit, 70000);
   assert.equal(summary.body.data.dailyProfit, 70000);
-  assert.equal(summary.body.data.profitType, "gross");
+  assert.equal(summary.body.data.profitType, "net");
 
   const dash = await request(app).get("/dashboard-stats").set("Authorization", `Bearer ${t}`);
   assert.equal(dash.status, 200);
   assert.equal(dash.body.data.revenue, 100000);
+  assert.equal(dash.body.data.cogs, 0);
   assert.equal(dash.body.data.totalExpenses, 30000);
   assert.equal(dash.body.data.profit, 70000);
-  assert.equal(dash.body.data.grossProfit, 70000);
+  assert.equal(dash.body.data.grossProfit, 100000);
+  assert.equal(dash.body.data.netProfit, 70000);
   assert.equal(dash.body.data.dailyProfit, 70000);
   assert.equal(dash.body.data.date, dayStart.toISOString().slice(0, 10));
-  assert.equal(dash.body.data.profitType, "gross");
+  assert.equal(dash.body.data.profitType, "net");
 
   const debug = await request(app).get("/debug/expenses").set("Authorization", `Bearer ${t}`).query({
     date: dayStart.toISOString().slice(0, 10),
@@ -266,9 +271,9 @@ test("gross profit: sales 100k minus expenses 30k equals 70k", async () => {
   assert.equal(debug.body.data.totalSales, 100000);
   assert.equal(debug.body.data.totalExpenses, 30000);
   assert.equal(debug.body.data.profit, 70000);
-  assert.equal(debug.body.data.grossProfit, 70000);
+  assert.equal(debug.body.data.grossProfit, 100000);
   assert.equal(debug.body.data.dailyProfit, 70000);
-  assert.equal(debug.body.data.profitType, "gross");
+  assert.equal(debug.body.data.profitType, "net");
   assert.ok(Array.isArray(debug.body.data.expenses));
 });
 
@@ -336,6 +341,7 @@ test("three expenses with sync ids then replay same request_ids — no extra row
     });
   assert.equal(summary.status, 200);
   assert.equal(summary.body.data.totalExpenses, 600);
-  assert.equal(summary.body.data.grossProfit, -600);
+  assert.equal(summary.body.data.grossProfit, 0);
   assert.equal(summary.body.data.dailyProfit, -600);
+  assert.equal(summary.body.data.netProfit, -600);
 });

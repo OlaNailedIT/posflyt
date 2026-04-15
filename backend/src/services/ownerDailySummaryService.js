@@ -1,7 +1,7 @@
 const prisma = require("../config/prisma");
-const { roundCurrency } = require("../utils/paymentState");
 const { getBusinessDayRange } = require("../utils/businessDayRange");
 const { ensureBusinessSettings } = require("./settingsService");
+const { aggregateDailyProfit } = require("./dailyProfitService");
 
 /**
  * Phase 7.12.4: aggregate sales for the business’s local calendar day (IANA zone on Settings).
@@ -16,13 +16,10 @@ async function getOwnerDailySummary(businessId) {
     tz
   );
 
-  const [salesAgg, txCount, topItems] = await Promise.all([
-    prisma.transaction.aggregate({
-      where: { businessId, createdAt: { gte: from, lte: to } },
-      _sum: { totalAmount: true },
-    }),
+  const [dpe, txCount, topItems] = await Promise.all([
+    aggregateDailyProfit(businessId, from, to),
     prisma.transaction.count({
-      where: { businessId, createdAt: { gte: from, lte: to } },
+      where: { businessId, createdAt: { gte: from, lte: to }, transactionType: "SALE" },
     }),
     prisma.transactionItem.groupBy({
       by: ["productId"],
@@ -30,13 +27,14 @@ async function getOwnerDailySummary(businessId) {
         transaction: {
           businessId,
           createdAt: { gte: from, lte: to },
+          transactionType: "SALE",
         },
       },
       _sum: { quantity: true },
     }),
   ]);
 
-  const totalSales = roundCurrency(Number(salesAgg._sum.totalAmount || 0));
+  const totalSales = dpe.revenue;
 
   let topItemName = "None";
   if (topItems.length) {
@@ -51,6 +49,10 @@ async function getOwnerDailySummary(businessId) {
 
   return {
     totalSales,
+    cogs: dpe.cogs,
+    grossProfit: dpe.grossProfit,
+    totalExpenses: dpe.totalExpenses,
+    netProfit: dpe.netProfit,
     transactions: txCount,
     topItemName,
     currencySymbol: settings.currencySymbol || "$",

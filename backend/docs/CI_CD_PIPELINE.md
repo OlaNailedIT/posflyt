@@ -48,7 +48,7 @@ flowchart LR
 1. **Pull request** → **CI** runs (backend: `ci-env-guard`, `predeploy`, guarded `migrate deploy`, tests; frontend: `npm run build`).
 2. **Merge to `main`** → CI runs again on `main`.
 3. **CI/CD Pipeline** (`deploy.yml`) triggers when **CI** completes **successfully** on `main` (or manually via `workflow_dispatch`). It calls your **staging deploy hook** (e.g. Render), then polls **public health URLs** until they pass.
-4. **Deploy Production** is **only** `workflow_dispatch` (or optional scheduled release). It requires the **`production`** GitHub Environment (configure **required reviewers**). It creates a **release tag**, POSTs to **production deploy hook** with payload, then hits production health URLs.
+4. **Deploy Production** is **only** `workflow_dispatch` (or optional scheduled release). It requires the **`production`** GitHub Environment (configure **required reviewers**). It **verifies** (same commit): a **successful `CI` workflow run** and an **allowed git tag** on that commit (e.g. `v1.0-rc.0`, semver, or dated `vYYYY.MM.DD-*`). Tag the commit **before** running the workflow; the deploy hook receives that tag name. Then it POSTs to **production deploy hook** and hits production health URLs.
 
 **Human rule:** Do not run **Deploy Production** until staging is verified for that same commit lineage (same merge or same artifact you intend to ship).
 
@@ -58,7 +58,7 @@ flowchart LR
 |------|---------|------|
 | `.github/workflows/ci.yml` | `push` / `pull_request` to `main`, `master`, `develop` | **Validation gate:** schema (`predeploy`), migrations against ephemeral Postgres, tests, frontend build. |
 | `.github/workflows/deploy.yml` | `workflow_run` after successful **CI** on `main`, or `workflow_dispatch` | **Staging promotion:** trigger host deploy + smoke health checks (`name: CI/CD Pipeline`). |
-| `.github/workflows/deploy-production.yml` | `workflow_dispatch` only | **Production promotion:** tag + hook + health; separate **rollback** path via hook. |
+| `.github/workflows/deploy-production.yml` | `workflow_dispatch` only | **Production promotion:** **CI + tag gates** on the commit, then hook + health; separate **rollback** path via hook (no CI/tag gates). |
 
 ### Why `deploy.yml` does not include CI or production `migrate deploy`
 

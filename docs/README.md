@@ -17,5 +17,9 @@
 | [adr/001-sync-idempotency.md](./adr/001-sync-idempotency.md) | ADR: offline sync & duplicate prevention |
 | [adr/002-auth-session-model.md](./adr/002-auth-session-model.md) | ADR: JWT + session (`jti`) MVP model |
 | [environments.md](./environments.md) | Legacy environment inventory (if maintained) |
+| [PRODUCTION_GO_NO_GO.md](./PRODUCTION_GO_NO_GO.md) | Release gate checklist before production |
+| [INCIDENT_PLAYBOOK.md](./INCIDENT_PLAYBOOK.md) | Detection, containment, recovery |
+| [DRIFT_MONITORING.md](./DRIFT_MONITORING.md) | Post-deploy correctness monitor |
+| [DEPLOYMENT_RUNBOOK_NEON_RENDER_VERCEL.md](./DEPLOYMENT_RUNBOOK_NEON_RENDER_VERCEL.md) | Neon + Render + Vercel step-by-step + Cursor prompt |
 
 Start here for **production readiness** and **backlog alignment**.

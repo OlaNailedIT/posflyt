@@ -18,7 +18,7 @@ const isoDate = z.preprocess(
 );
 
 const transactionsListQuery = paginationQuery.extend({
-  sortBy: emptyToUndefined(z.enum(["createdAt", "total", "syncStatus"]).optional()),
+    sortBy: emptyToUndefined(z.enum(["createdAt", "totalAmount", "syncStatus"]).optional()),
   order: emptyToUndefined(z.enum(["asc", "desc"]).optional()),
   userId: emptyToUndefined(z.string().uuid().optional()),
   syncStatus: emptyToUndefined(z.enum(["PENDING", "SYNCED", "FAILED"]).optional()),

@@ -1,6 +1,7 @@
 const { sendError } = require("../utils/http");
 const { logger } = require("../utils/logger");
 const { captureException } = require("../utils/sentry");
+const { logSchemaDrift } = require("../utils/schemaDriftLog");
 
 function notFound(req, res) {
   return sendError(res, {
@@ -27,6 +28,17 @@ function errorHandler(err, req, res, _next) {
     userId: req.auth?.userId,
     businessId: req.auth?.businessId,
   };
+
+  const prismaCode = err.code && String(err.code).match(/^P[0-9]{4}$/) ? String(err.code) : null;
+  if (prismaCode) {
+    logSchemaDrift({
+      layer: "prisma",
+      prismaCode,
+      message: err.message,
+      route: req.originalUrl,
+      meta: err.meta,
+    });
+  }
 
   if (code === "CONFLICT" && err.conflictData) {
     log.warn(logBase, "API error response");

@@ -1,26 +1,28 @@
 const prisma = require("../config/prisma");
-const { roundCurrency } = require("../utils/paymentState");
 const { assertExpenseConsistency } = require("./expenseService");
 const { getBusinessDayRange } = require("../utils/businessDayRange");
 const { isLowStockCondition } = require("../utils/lowStock");
+const { aggregateDailyProfit } = require("./dailyProfitService");
 
 async function getDashboardStats(businessId, options = {}) {
   const lowStockAlertsEnabled = Boolean(options.lowStockAlertsEnabled);
+  const settings = await prisma.settings.findUnique({
+    where: { businessId },
+    select: { businessTimeZone: true },
+  });
+  const tzRaw = settings?.businessTimeZone != null ? String(settings.businessTimeZone).trim() : "";
+  const tz = tzRaw || "UTC";
   const now = new Date();
-  /** Explicit UTC business day until per-business IANA zone is stored on Settings. */
-  const { from: dayStart, to: dayEnd } = getBusinessDayRange(now, "UTC");
+  const { from: dayStart, to: dayEnd, dateKey } = getBusinessDayRange(now, tz);
   const todayWhere = { businessId, createdAt: { gte: dayStart, lte: dayEnd } };
 
-  const [revenueAgg, transactionsToday, expenseTodayAgg, customersCount, recurringCustomersRaw, inventorySnapshot] =
-    await Promise.all([
-    prisma.transaction.aggregate({
-      where: todayWhere,
-      _sum: { totalAmount: true },
-    }),
-    prisma.transaction.count({ where: todayWhere }),
-    prisma.expense.aggregate({
-      where: todayWhere,
-      _sum: { amount: true },
+  const [dpe, transactionsToday, customersCount, recurringCustomersRaw, inventorySnapshot] = await Promise.all([
+    aggregateDailyProfit(businessId, dayStart, dayEnd),
+    prisma.transaction.count({
+      where: {
+        ...todayWhere,
+        transactionType: "SALE",
+      },
     }),
     prisma.customer.count({ where: { businessId } }),
     prisma.transaction.groupBy({
@@ -46,21 +48,56 @@ async function getDashboardStats(businessId, options = {}) {
     : [];
   const lowStockCount = lowStockProducts.length;
 
-  const revenue = roundCurrency(Number(revenueAgg._sum.totalAmount || 0));
-  const rawExpenseSum = Number(expenseTodayAgg._sum.amount || 0);
-  const totalExpenses = assertExpenseConsistency(rawExpenseSum);
-  const grossProfit = roundCurrency(revenue - totalExpenses);
-  const dailyProfit = grossProfit;
-  const summaryDate = dayStart.toISOString().slice(0, 10);
+  /** Today's top-selling products by line quantity (SALE transactions in business day). */
+  const saleLines = await prisma.transactionItem.findMany({
+    where: {
+      transaction: {
+        businessId,
+        transactionType: "SALE",
+        createdAt: { gte: dayStart, lte: dayEnd },
+      },
+    },
+    select: {
+      productId: true,
+      quantity: true,
+      product: { select: { name: true } },
+    },
+  });
+  const qtyByProduct = new Map();
+  const nameByProduct = new Map();
+  for (const row of saleLines) {
+    const pid = row.productId;
+    const q = Math.abs(Number(row.quantity) || 0);
+    qtyByProduct.set(pid, (qtyByProduct.get(pid) || 0) + q);
+    if (!nameByProduct.has(pid)) nameByProduct.set(pid, row.product?.name || "Product");
+  }
+  const topSellingToday = [...qtyByProduct.entries()]
+    .map(([productId, unitsSold]) => ({
+      productId,
+      name: nameByProduct.get(productId) || "Product",
+      unitsSold,
+    }))
+    .sort((a, b) => b.unitsSold - a.unitsSold)
+    .slice(0, 5);
+
+  const totalExpenses = assertExpenseConsistency(dpe.totalExpenses);
+  const summaryDate = dateKey;
 
   return {
     date: summaryDate,
-    revenue,
+    calendar: { timeZone: tz },
+    /** Net subtotal sales (SALE − RETURN), business calendar day. */
+    revenue: dpe.revenue,
+    /** Cost of goods sold (snapshot at sale; returns reduce). */
+    cogs: dpe.cogs,
+    /** Revenue − COGS (subtotal basis, before operating expenses). */
+    grossProfit: dpe.grossProfit,
     totalExpenses,
-    dailyProfit,
-    grossProfit,
-    profit: grossProfit,
-    profitType: "gross",
+    /** Gross profit − expenses. */
+    netProfit: dpe.netProfit,
+    dailyProfit: dpe.netProfit,
+    profit: dpe.netProfit,
+    profitType: "net",
     transactions: transactionsToday,
     lowStock: lowStockCount,
     customers: customersCount,
@@ -73,6 +110,7 @@ async function getDashboardStats(businessId, options = {}) {
         isCritical: Number(p.stock) <= half,
       };
     }),
+    topSellingToday,
   };
 }
 

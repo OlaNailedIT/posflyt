@@ -1,3 +1,16 @@
+/**
+ * @file LEGACY_ADAPTER_ONLY — Phase 2 Step 7
+ *
+ * Sale persistence, payment normalization, inventory decrement, and related effects are **execution
+ * adapter** responsibilities. Client UFEC (FinancialEvent → executeFinancialEvent → enforcement →
+ * ledger expectation) owns product-facing financial correctness. Do **not** add new business rules
+ * here without extending UFEC first. Server validation remains for integrity, quotas, and abuse
+ * prevention — not a parallel “decision system” vs UFEC.
+ *
+ * @see docs/UFEC_PHASE2_DOMINANCE.md
+ */
+
+const crypto = require("crypto");
 const { Prisma } = require("@prisma/client");
 const { markFirstSaleDone } = require("./onboardingService");
 const { logAudit } = require("./auditService");
@@ -16,6 +29,20 @@ const { parseSplitPayments } = require("../utils/splitPayments");
 const { isMeasuredProduct, unitPriceForSale, assertSaleQuantity } = require("../utils/productUnits");
 const { recordLowStockAlertIfNeeded } = require("./lowStockAlertService");
 const { attachReceiptArtifactsIfEnabled } = require("./receiptService");
+
+function safeHexEquals(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== 64 || b.length !== 64) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+  } catch {
+    return false;
+  }
+}
+const { logUfecLedgerObservation } = require("../utils/ufecLedgerObservation");
+const { logLegacyAdapterZone } = require("../utils/ufecLegacyAdapterGuard");
+
+logLegacyAdapterZone("transactionService");
 
 /** Normalize credit / partial payment fields. Server total is authoritative. */
 function normalizeCreditFields(payload, totalAmount, location) {
@@ -119,6 +146,7 @@ function mapTransactionPaymentFields(row) {
   return {
     ...row,
     paymentStatus: paymentStatusToApi(row.paymentStatus),
+    transactionType: row.transactionType || "SALE",
   };
 }
 
@@ -348,6 +376,26 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
     },
   });
   if (existingForBusiness) {
+    const incomingHash = payload.payload_hash;
+    if (incomingHash && !existingForBusiness.payloadHash) {
+      logger.warn(
+        {
+          event: "IDEMPOTENCY_LEGACY_ROW_NO_HASH",
+          clientTransactionId: transactionId,
+          businessId,
+        },
+        "duplicate client_transaction_id: stored row has no payloadHash; soft-allow (plan backfill or sunset)"
+      );
+    }
+    if (incomingHash && existingForBusiness.payloadHash) {
+      if (!safeHexEquals(incomingHash, existingForBusiness.payloadHash)) {
+        const err = new Error("Idempotent payload mismatch for this transaction id");
+        err.statusCode = 409;
+        err.code = "IDEMPOTENCY_PAYLOAD_MISMATCH";
+        err.location = location;
+        throw err;
+      }
+    }
     if (payload.event_id && existingForBusiness.lastProcessedEventId === payload.event_id) {
       logger.info(
         {
@@ -405,7 +453,7 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
   }
 
   const productsById = new Map(products.map((p) => [p.id, p]));
-  let subtotal = 0;
+  const lineTotals = [];
   let weightedLineCount = 0;
 
   for (const item of items) {
@@ -421,7 +469,21 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
       throw error;
     }
     const lineUnit = unitPriceForSale(product);
-    subtotal += lineUnit * qty;
+    const lineTotal = roundCurrency(qty * lineUnit);
+    const unitCostAtSale = roundCurrency(Number(product.costPrice));
+    const lineCost = roundCurrency(qty * unitCostAtSale);
+    const lineProfit = roundCurrency(lineTotal - lineCost);
+    lineTotals.push({
+      product,
+      item,
+      qty,
+      lineUnit,
+      lineTotal,
+      unitCostAtSale,
+      lineSubtotal: lineTotal,
+      lineCost,
+      lineProfit,
+    });
   }
 
   if (weightedLineCount > 0) {
@@ -449,8 +511,22 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
     },
   });
   const taxRate = settings?.taxEnabled ? Number(settings.taxRate || 0) : 0;
+  const subtotal = roundCurrency(lineTotals.reduce((s, l) => s + l.lineTotal, 0));
   const taxAmount = roundCurrency(subtotal * (taxRate / 100));
   const total = roundCurrency(subtotal + taxAmount);
+  const totalCogs = roundCurrency(lineTotals.reduce((s, l) => s + l.lineCost, 0));
+  const grossLineProfit = roundCurrency(lineTotals.reduce((s, l) => s + l.lineProfit, 0));
+
+  if (payload.total != null && payload.total !== "") {
+    const clientT = roundCurrency(Number(payload.total));
+    if (Math.abs(clientT - total) > 0.02) {
+      const error = new Error("Client total does not match server-calculated sale total");
+      error.statusCode = 400;
+      error.code = "CLIENT_TOTAL_MISMATCH";
+      error.location = location;
+      throw error;
+    }
+  }
 
   const credit = normalizeCreditFields(payload, total, location);
   assertConsistentPaymentState(total, credit.amountPaid, credit.balanceDue);
@@ -468,17 +544,32 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
       amountPaid: roundCurrency(credit.amountPaid),
       balanceDue: roundCurrency(credit.balanceDue),
       dueDate: credit.dueDate,
+      subtotalAmount: subtotal,
+      taxAmount,
+      transactionType: "SALE",
+      totalCogs,
+      grossLineProfit,
       totalAmount: roundCurrency(total),
       lastProcessedEventId: payload.event_id || null,
+      payloadHash: payload.payload_hash || null,
       createdAt: created_at ? new Date(created_at) : now,
       syncStatus: "SYNCED",
       syncedAt: now,
     },
   });
 
-  for (const item of items) {
-    const product = productsById.get(item.product_id);
-    const qty = assertSaleQuantity(product, item.quantity, location);
+  logUfecLedgerObservation({
+    phase: "transaction_financial_record",
+    eventType: "SALE_EVENT",
+    clientEventId: transactionId,
+    totalAmount: roundCurrency(total),
+    subtotalAmount: subtotal,
+    taxAmount,
+    orderingNote: "financial_row_before_inventory_decrement",
+  });
+
+  for (const line of lineTotals) {
+    const { product, qty } = line;
     const stockUpdated = await tx.product.updateMany({
       where: { id: product.id, businessId, stock: { gte: qty } },
       data: { stock: { decrement: qty } },
@@ -493,9 +584,13 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
     await tx.transactionItem.create({
       data: {
         transactionId,
-        productId: item.product_id,
+        productId: product.id,
         quantity: qty,
-        price: roundCurrency(unitPriceForSale(product)),
+        price: roundCurrency(line.lineUnit),
+        unitCostAtSale: line.unitCostAtSale,
+        lineSubtotal: line.lineSubtotal,
+        lineCost: line.lineCost,
+        lineProfit: line.lineProfit,
       },
     });
 
@@ -677,15 +772,17 @@ async function createTransactionsBulk(businessId, userId, transactions, options 
       const code =
         error.code === "INSUFFICIENT_STOCK"
           ? "INSUFFICIENT_STOCK"
-          : error.code === "INCONSISTENT_PAYMENT_STATE"
-            ? "INCONSISTENT_PAYMENT_STATE"
-            : error.code === "PAYMENT_SPLIT_MISMATCH"
-              ? "PAYMENT_SPLIT_MISMATCH"
-              : error.code === "INVALID_ITEM_QUANTITY"
-                ? "INVALID_ITEM_QUANTITY"
-                : error.statusCode === 400
-                  ? error.code || "VALIDATION_FAILED"
-                  : "TRANSIENT_SYNC_FAILURE";
+          : error.code === "IDEMPOTENCY_PAYLOAD_MISMATCH"
+            ? "IDEMPOTENCY_PAYLOAD_MISMATCH"
+            : error.code === "INCONSISTENT_PAYMENT_STATE"
+              ? "INCONSISTENT_PAYMENT_STATE"
+              : error.code === "PAYMENT_SPLIT_MISMATCH"
+                ? "PAYMENT_SPLIT_MISMATCH"
+                : error.code === "INVALID_ITEM_QUANTITY"
+                  ? "INVALID_ITEM_QUANTITY"
+                  : error.statusCode === 400
+                    ? error.code || "VALIDATION_FAILED"
+                    : "TRANSIENT_SYNC_FAILURE";
       if (code === "TRANSIENT_SYNC_FAILURE") {
         await logAudit({
           businessId,
@@ -749,9 +846,30 @@ async function listTransactions(businessId) {
   return rows.map((r) => mapTransactionPaymentFields(r));
 }
 
+/** `Transaction.id` equals the client's `client_transaction_id` for synced sales. */
+async function findTransactionForBusinessById(businessId, transactionId) {
+  const row = await prisma.transaction.findFirst({
+    where: { id: transactionId, businessId },
+    include: {
+      customer: { select: { id: true, name: true, phone: true, email: true } },
+      items: {
+        include: {
+          product: { select: { id: true, name: true, barcode: true } },
+        },
+      },
+    },
+  });
+  if (!row) return null;
+  return mapTransactionPaymentFields(row);
+}
+
+const { createReturnTransaction } = require("./returnService");
+
 module.exports = {
   createTransactionsBulk,
+  createReturnTransaction,
   listTransactions,
+  findTransactionForBusinessById,
   settleTransactionCredit,
   getCustomerOutstanding,
   mapTransactionPaymentFields,

@@ -8,6 +8,35 @@ const { logger } = require("../utils/logger");
 const { sanitizeDisplayName, sanitizeProductCode } = require("../utils/sanitize");
 const { normalizeUnitType } = require("../utils/productUnits");
 
+/** DPE: require non-negative cost and positive sell price (per unit for measured goods). */
+function assertProductEconomics({ unitType, costPrice, sellingPrice, price, pricePerUnit }) {
+  const cp = Number(costPrice);
+  if (!Number.isFinite(cp) || cp < 0) {
+    const error = new Error("costPrice is required and must be a non-negative number");
+    error.statusCode = 400;
+    error.code = "VALIDATION_FAILED";
+    throw error;
+  }
+  const ut = normalizeUnitType(unitType || "unit");
+  if (ut === "unit") {
+    const sp = Number(sellingPrice ?? price ?? 0);
+    if (!Number.isFinite(sp) || sp <= 0) {
+      const error = new Error("Selling price must be greater than zero");
+      error.statusCode = 400;
+      error.code = "VALIDATION_FAILED";
+      throw error;
+    }
+  } else {
+    const ppu = pricePerUnit != null ? Number(pricePerUnit) : Number(price ?? sellingPrice ?? 0);
+    if (!Number.isFinite(ppu) || ppu <= 0) {
+      const error = new Error("pricePerUnit must be greater than zero for measured products");
+      error.statusCode = 400;
+      error.code = "VALIDATION_FAILED";
+      throw error;
+    }
+  }
+}
+
 function normalizeLowStockThreshold(raw) {
   if (raw === undefined || raw === null) return null;
   const n = Number(raw);
@@ -61,6 +90,14 @@ async function createProduct(businessId, payload, userId) {
   } else {
     pricePerUnit = null;
   }
+
+  assertProductEconomics({
+    unitType,
+    costPrice,
+    sellingPrice,
+    price,
+    pricePerUnit,
+  });
 
   const name = sanitizeDisplayName(rest.name, 200);
   const barcode =
@@ -187,6 +224,29 @@ async function updateProduct(businessId, productId, payload, userId) {
   if (Object.prototype.hasOwnProperty.call(raw, "lowStockThreshold")) {
     data.lowStockThreshold = normalizeLowStockThreshold(raw.lowStockThreshold);
   }
+
+  const mergedCost =
+    data.costPrice !== undefined ? Number(data.costPrice) : Number(existing.costPrice);
+  const mergedUnit = data.unitType !== undefined ? normalizeUnitType(data.unitType) : existing.unitType;
+  const mergedSelling =
+    data.sellingPrice !== undefined
+      ? Number(data.sellingPrice)
+      : data.price !== undefined
+        ? Number(data.price)
+        : Number(existing.sellingPrice);
+  const mergedPpu =
+    data.pricePerUnit !== undefined
+      ? data.pricePerUnit
+      : mergedUnit !== "unit"
+        ? existing.pricePerUnit
+        : null;
+  assertProductEconomics({
+    unitType: mergedUnit,
+    costPrice: mergedCost,
+    sellingPrice: mergedSelling,
+    price: data.price !== undefined ? Number(data.price) : Number(existing.price),
+    pricePerUnit: mergedPpu != null ? Number(mergedPpu) : null,
+  });
 
   const updated = await prisma.product.update({
     where: { id: productId },

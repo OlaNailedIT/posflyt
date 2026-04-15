@@ -22,7 +22,9 @@
     "prisma:db-push-dev": "node scripts/prisma-safety-check.js prisma db push",
     "prisma:recovery": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prisma-recovery.ps1",
     "seed": "prisma db seed",
-    "audit:integrity": "node scripts/auditFinancialIntegrity.js"
+    "audit:integrity": "node scripts/auditFinancialIntegrity.js",
+    "drift:monitor": "node scripts/drift-monitor.js",
+    "route:validate": "node scripts/validate-route-registry.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

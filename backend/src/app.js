@@ -62,9 +62,12 @@ const { getHealth, getReady } = require("./controllers/healthController");
 
 // Public liveness probe: lightweight; DB check optional for strict orchestrators.
 app.get("/health", getHealth);
+/** Alias when load balancers or dashboards are configured with a path under `/api`. */
+app.get("/api/health", getHealth);
 
 // Readiness: DB required; Redis when REDIS_URL is set (queue/cache).
 app.get("/ready", getReady);
+app.get("/api/ready", getReady);
 
 app.use(
   pinoHttp({
@@ -88,16 +91,23 @@ app.post("/api/payments/webhook/stripe", express.raw({ type: "application/json" 
 app.post("/api/payments/webhook/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
 app.post("/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
 app.post("/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
+/** When payment provider URL is registered as `…/api/billing/webhooks/…` (API base includes `/api`). */
+app.post("/api/billing/webhooks/stripe", express.raw({ type: "application/json" }), stripeApiWebhook);
+app.post("/api/billing/webhooks/paystack", express.raw({ type: "application/json" }), paystackApiWebhook);
 
 /** Phase 7.12.1: public receipt PDF (no auth; token is unguessable). */
 app.get("/receipts/public/:token", getPublicReceipt);
+app.get("/api/receipts/public/:token", getPublicReceipt);
 
 /** Larger JSON body for Phase 7.13.3 IndexedDB cloud backup uploads (admin-only route). */
 function jsonBodyParser(req, res, next) {
   const url = req.originalUrl || req.url || "";
   const large =
     req.method === "POST" &&
-    (url === "/backups/indexeddb" || url.startsWith("/backups/indexeddb?"));
+    (url === "/backups/indexeddb" ||
+      url.startsWith("/backups/indexeddb?") ||
+      url === "/api/backups/indexeddb" ||
+      url.startsWith("/api/backups/indexeddb?"));
   return express.json({ limit: large ? "32mb" : "1mb" })(req, res, next);
 }
 
@@ -174,6 +184,22 @@ app.use("/api/v1", streamRoutes);
 app.use("/api/v1", chaosRoutes);
 /** Phase 8: shard routing + derived global view metadata (admin-only). */
 app.use("/api/v1", distributedRoutes);
+
+/**
+ * Controlled `/api/*` aliases — base-path compatibility when `VITE_API_URL` is `https://host/api`
+ * (requests become `/api/products`, not `/products`). Do not duplicate `/api/v1/*`, `/api/admin`, `/api/bi`.
+ * Prefer setting the client base URL to `https://host` with paths as in `src/services/api.js`.
+ */
+app.use("/api/auth", authLimiter);
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/inventory-count", inventoryCountRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api", customerRoutes);
+app.use("/api", settingsRoutes);
+app.use("/api", expenseRoutes);
+/** `/dashboard-stats`, `/analytics/daily-summary` — shell loads these without `/api` in the path string. */
+app.use("/api", dashboardRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

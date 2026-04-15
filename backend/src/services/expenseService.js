@@ -3,6 +3,7 @@ const { logger } = require("../utils/logger");
 const { roundCurrency } = require("../utils/paymentState");
 const { AppError } = require("../utils/AppError");
 const { startOfUtcDay, endOfUtcDay, getBusinessDayRange } = require("../utils/businessDayRange");
+const { aggregateDailyProfit, expenseWhereInRange } = require("./dailyProfitService");
 
 function parseIsoDateDay(iso) {
   if (!iso || typeof iso !== "string") return null;
@@ -68,6 +69,7 @@ function serializeExpense(row) {
     amount: roundCurrency(Number(row.amount)),
     category: row.category,
     note: row.note,
+    expenseDate: row.expenseDate ? row.expenseDate.toISOString() : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     requestId: row.requestId,
@@ -90,11 +92,21 @@ function normalizeExpenseCategory(category) {
 /**
  * @returns {Promise<{ expense: object, reason: 'created' | 'request' | 'event' }>}
  */
+function resolveExpenseCalendarDay(raw) {
+  if (raw == null || raw === "") return null;
+  const d = parseIsoDateDay(String(raw).trim());
+  if (!d) {
+    throw new AppError("INVALID_EXPENSE_DATE", "expense_date must be YYYY-MM-DD", 400);
+  }
+  return startOfUtcDay(d);
+}
+
 async function createExpense({
   businessId,
   amount,
   category,
   note,
+  expense_date: expenseDateInput,
   request_id: requestId,
   event_id: eventId,
 }) {
@@ -130,6 +142,7 @@ async function createExpense({
   }
 
   try {
+    const expenseDay = resolveExpenseCalendarDay(expenseDateInput) ?? startOfUtcDay(new Date());
     const created = await prisma.expense.create({
       data: {
         businessId,
@@ -138,6 +151,7 @@ async function createExpense({
         note: noteTrimmed,
         requestId: requestId || null,
         eventId: eventId || null,
+        expenseDate: expenseDay,
       },
     });
     logger.info(
@@ -182,10 +196,7 @@ async function createExpense({
 async function getExpenses({ businessId, from, to }) {
   const { from: f, to: t } = normalizeRange(from, to);
   const rows = await prisma.expense.findMany({
-    where: {
-      businessId,
-      createdAt: { gte: f, lte: t },
-    },
+    where: expenseWhereInRange(businessId, f, t),
     orderBy: { createdAt: "desc" },
     take: 500,
   });
@@ -195,17 +206,10 @@ async function getExpenses({ businessId, from, to }) {
 async function getDailySummary(businessId, fromInput, toInput) {
   const { from, to } = normalizeRange(fromInput, toInput);
 
-  const [salesAgg, txCount, expenseAgg, topItems] = await Promise.all([
-    prisma.transaction.aggregate({
-      where: { businessId, createdAt: { gte: from, lte: to } },
-      _sum: { totalAmount: true },
-    }),
+  const [dpe, txCount, topItems] = await Promise.all([
+    aggregateDailyProfit(businessId, from, to),
     prisma.transaction.count({
-      where: { businessId, createdAt: { gte: from, lte: to } },
-    }),
-    prisma.expense.aggregate({
-      where: { businessId, createdAt: { gte: from, lte: to } },
-      _sum: { amount: true },
+      where: { businessId, createdAt: { gte: from, lte: to }, transactionType: "SALE" },
     }),
     prisma.transactionItem.groupBy({
       by: ["productId"],
@@ -213,17 +217,17 @@ async function getDailySummary(businessId, fromInput, toInput) {
         transaction: {
           businessId,
           createdAt: { gte: from, lte: to },
+          transactionType: "SALE",
         },
       },
       _sum: { quantity: true },
     }),
   ]);
 
-  const totalSales = roundCurrency(Number(salesAgg._sum.totalAmount || 0));
-  const rawExpenseSum = Number(expenseAgg._sum.amount || 0);
-  const totalExpenses = assertExpenseConsistency(rawExpenseSum);
-  const grossProfit = roundCurrency(totalSales - totalExpenses);
-  const dailyProfit = grossProfit;
+  const totalSales = dpe.revenue;
+  const totalExpenses = assertExpenseConsistency(dpe.totalExpenses);
+  const grossProfit = dpe.grossProfit;
+  const dailyProfit = dpe.netProfit;
 
   const dateFromKey = from.toISOString().slice(0, 10);
   const dateToKey = to.toISOString().slice(0, 10);
@@ -246,11 +250,14 @@ async function getDailySummary(businessId, fromInput, toInput) {
     dateFrom: dateFromKey,
     dateTo: dateToKey,
     totalSales,
+    revenue: totalSales,
+    cogs: dpe.cogs,
     totalExpenses,
     dailyProfit,
     grossProfit,
-    profit: grossProfit,
-    profitType: "gross",
+    netProfit: dpe.netProfit,
+    profit: dpe.netProfit,
+    profitType: "net",
     transactions: txCount,
     topProduct,
     from: from.toISOString(),
@@ -286,7 +293,7 @@ async function listExpensesForDebug(businessId, dateIso) {
 
   const [rows, summary] = await Promise.all([
     prisma.expense.findMany({
-      where: { businessId, createdAt: { gte: from, lte: to } },
+      where: expenseWhereInRange(businessId, from, to),
       orderBy: { createdAt: "desc" },
     }),
     getDailySummary(businessId, from, to),

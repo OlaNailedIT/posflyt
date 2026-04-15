@@ -1,4 +1,5 @@
 # Phase 6.5 — validation gate: predeploy, migrate deploy (ephemeral DB), tests, frontend build.
+# Maps to docs/PRODUCTION_GO_NO_GO.md §1–2 (build/CI + migration safety in CI).
 name: CI
 
 on:
@@ -9,6 +10,7 @@ on:
 
 jobs:
   backend:
+    name: Backend — env guard, predeploy, migrate, tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -44,18 +46,21 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install
         run: npm ci
-      - name: CI env guard (blocks misconfigured production CI)
+      - name: "Gate: CI env guard"
         run: node scripts/ci-env-guard.js
-      - name: Predeploy checks (schema validate — same gate as start:prod)
+      - name: "Gate: Predeploy (prisma validate — same as npm run predeploy / start:prod)"
         run: npm run predeploy
-      - name: Prisma migrate (test database)
+      - name: "Gate: Prisma safety + migrate deploy (ephemeral DB)"
         run: node scripts/prisma-safety-check.js prisma migrate deploy
-      - name: Unit tests
+      - name: "Gate: Unit tests"
         run: npm test
-      - name: Integration tests
+      - name: "Gate: Integration tests"
         run: npm run test:integration
+      - name: "Gate: Route registry (app.js mounts vs routeRegistry.js)"
+        run: npm run route:validate
 
   frontend:
+    name: Frontend — install and build
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -14,6 +14,7 @@ const createSchema = z
     amount: z.coerce.number(),
     category: z.string().min(1),
     note: z.string().optional(),
+    expense_date: z.string().min(8).max(16).optional(),
     request_id: z.string().min(1).optional(),
     event_id: z.string().min(1).optional(),
   })
@@ -52,6 +53,7 @@ async function postExpense(req, res, next) {
       amount: payload.amount,
       category: payload.category,
       note: payload.note,
+      expense_date: payload.expense_date,
       request_id: payload.request_id,
       event_id: payload.event_id,
     });

@@ -27,6 +27,12 @@ const usageRoutes = require("./routes/usageRoutes");
 const marketingRoutes = require("./routes/marketingRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
 const inventoryCountRoutes = require("./routes/inventoryCountRoutes");
+const eventRoutes = require("./routes/eventRoutes");
+const reconciliationRoutes = require("./routes/reconciliationRoutes");
+const observabilityRoutes = require("./routes/observabilityRoutes");
+const streamRoutes = require("./routes/streamRoutes");
+const chaosRoutes = require("./routes/chaosRoutes");
+const distributedRoutes = require("./routes/distributedRoutes");
 const { getPublicReceipt } = require("./controllers/receiptPublicController");
 const { apiLimiter, authLimiter } = require("./middlewares/rateLimiter");
 const { attachRequestId } = require("./middlewares/requestId");
@@ -157,8 +163,22 @@ app.use("/api/bi", biRoutes);
 app.use("/", usageRoutes);
 app.use("/", marketingRoutes);
 app.use("/", expenseRoutes);
+/** Phase 4B: integrity event ingest (JWT + tenant-scoped); path prefix matches REST versioning. */
+app.use("/api/v1", eventRoutes);
+app.use("/api/v1", reconciliationRoutes);
+/** Phase 6: admin financial observability (integrity timeline, health, anomalies). */
+app.use("/api/v1", observabilityRoutes);
+/** Phase 6.5: in-process financial event stream (recent buffer + counters). */
+app.use("/api/v1", streamRoutes);
+/** Phase 7: chaos / resilience drills (env-gated; admin-only). */
+app.use("/api/v1", chaosRoutes);
+/** Phase 8: shard routing + derived global view metadata (admin-only). */
+app.use("/api/v1", distributedRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
+
+const { registerDefaultSubscribers } = require("./streaming/subscribers/registerDefaultSubscribers");
+registerDefaultSubscribers();
 
 module.exports = app;

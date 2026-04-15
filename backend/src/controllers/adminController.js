@@ -9,13 +9,26 @@ const { getDailyCloseStatus, confirmDailyClose } = require("../services/dailyClo
 const { processDuePaymentRetries } = require("../services/paymentRetryService");
 const { reconcilePaymentsForBusiness, applyReconciliationFixes } = require("../services/paymentReconciliationService");
 const { sendOk } = require("../utils/http");
+const { logger } = require("../utils/logger");
 
 async function getAdminSalesFeed(req, res, next) {
   try {
     const data = await getSalesFeed(req.auth.businessId);
     return sendOk(res, data);
   } catch (error) {
-    return next(error);
+    logger.error(
+      {
+        route: "/admin/sales-feed",
+        businessId: req.auth?.businessId,
+        err: error,
+        prismaMessage: error?.message,
+      },
+      "admin sales feed failed — returning empty feed"
+    );
+    return sendOk(res, [], 200, {
+      salesFeedUnavailable: true,
+      salesFeedErrorCode: "sales_feed_unavailable",
+    });
   }
 }
 

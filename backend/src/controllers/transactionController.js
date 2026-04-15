@@ -1,8 +1,17 @@
+/**
+ * HTTP adapter for POST /transactions and /transactions/return. Delegates to LEGACY_ADAPTER_ONLY
+ * services (transactionService, returnService). UFEC client layer owns decision semantics.
+ *
+ * @see docs/UFEC_PHASE2_DOMINANCE.md
+ */
+
 const { z } = require("zod");
 const prisma = require("../config/prisma");
 const {
   createTransactionsBulk,
+  createReturnTransaction,
   listTransactions,
+  findTransactionForBusinessById,
   settleTransactionCredit,
   mapTransactionPaymentFields,
 } = require("../services/transactionService");
@@ -37,6 +46,8 @@ const transactionSchema = z
     /** Phase 7.11.2: metrics / observability (optional). */
     checkout_source: z.enum(["standard", "quick"]).optional(),
     client_duration_ms: z.coerce.number().nonnegative().optional(),
+    /** SHA-256 hex of canonical body (excluding this field); enforced on duplicate id. */
+    payload_hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     created_at: z.string().datetime(),
     items: z
       .array(
@@ -236,6 +247,7 @@ async function postTransaction(req, res, next) {
     const statusCode = failed ? 207 : 201;
 
     const data = {
+      contractVersion: 2,
       synced: augmented.filter((r) => r.status === "created").length,
       duplicates: augmented.filter((r) => r.status === "duplicate").length,
       failed,
@@ -274,11 +286,93 @@ async function postTransaction(req, res, next) {
   }
 }
 
+const returnBodySchema = z
+  .object({
+    client_return_id: z.string().uuid().optional(),
+    client_transaction_id: z.string().uuid().optional(),
+    original_transaction_id: z.string().uuid(),
+    items: z
+      .array(
+        z
+          .object({
+            product_id: z.string().min(1),
+            quantity: z.coerce.number().positive(),
+          })
+          .strict()
+      )
+      .optional(),
+  })
+  .strict()
+  .refine((d) => Boolean(d.client_return_id || d.client_transaction_id), {
+    message: "client_return_id or client_transaction_id is required",
+    path: ["client_return_id"],
+  });
+
+async function postTransactionReturn(req, res, next) {
+  try {
+    const body = returnBodySchema.parse(req.body);
+    const result = await createReturnTransaction(req.auth.businessId, req.auth.userId, body, req.requestId);
+    if (result.status === "duplicate") {
+      return sendOk(res, {
+        duplicate: true,
+        transaction: mapTransactionPaymentFields(result.transaction),
+        saleReturn: result.saleReturn || null,
+      });
+    }
+    return sendOk(res, {
+      transaction: mapTransactionPaymentFields(result.transaction),
+      saleReturn: result.saleReturn || null,
+    });
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return sendError(res, {
+        statusCode: 400,
+        code: "VALIDATION_FAILED",
+        message: "Validation failed",
+        location: "controllers/transactionController.postTransactionReturn",
+        details: { requestId: req.requestId, errors: error.issues },
+      });
+    }
+    return next(error);
+  }
+}
+
 async function getTransactions(req, res, next) {
   try {
     const data = await listTransactions(req.auth.businessId);
     return sendOk(res, data);
   } catch (error) {
+    return next(error);
+  }
+}
+
+const clientTransactionIdParamSchema = z.string().uuid();
+
+/** GET /transactions/:clientTransactionId — server truth for idempotency recovery (id === client_transaction_id). */
+async function getTransactionByClientId(req, res, next) {
+  try {
+    const id = clientTransactionIdParamSchema.parse(req.params.clientTransactionId);
+    const transaction = await findTransactionForBusinessById(req.auth.businessId, id);
+    if (!transaction) {
+      return sendError(res, {
+        statusCode: 404,
+        code: "NOT_FOUND",
+        message: "Transaction not found",
+        location: "controllers/transactionController.getTransactionByClientId",
+        details: { requestId: req.requestId },
+      });
+    }
+    return sendOk(res, { contractVersion: 2, transaction });
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return sendError(res, {
+        statusCode: 400,
+        code: "VALIDATION_FAILED",
+        message: "Invalid transaction id",
+        location: "controllers/transactionController.getTransactionByClientId",
+        details: { requestId: req.requestId, errors: error.issues },
+      });
+    }
     return next(error);
   }
 }
@@ -341,4 +435,11 @@ async function postSettleTransactionCredit(req, res, next) {
   }
 }
 
-module.exports = { postTransaction, getTransactions, getTransactionReceipt, postSettleTransactionCredit };
+module.exports = {
+  postTransaction,
+  postTransactionReturn,
+  getTransactions,
+  getTransactionByClientId,
+  getTransactionReceipt,
+  postSettleTransactionCredit,
+};

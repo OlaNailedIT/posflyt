@@ -1,5 +1,5 @@
 const { z } = require("zod");
-const { registerOwner, login } = require("../services/authService");
+const { registerOwner, login, staffLogin, getSessionPayload } = require("../services/authService");
 const { rotateRefreshSession, revokeRefreshByRaw } = require("../services/refreshTokenService");
 const { sendOk, sendError } = require("../utils/http");
 const { setRefreshTokenCookie, clearRefreshTokenCookie } = require("../utils/refreshCookie");
@@ -18,6 +18,13 @@ const loginSchema = z
   .object({
     email: z.string().email(),
     password: z.string().min(1),
+  })
+  .strict();
+
+const staffLoginSchema = z
+  .object({
+    phone: z.string().trim().min(8).max(20),
+    pin: z.string().regex(/^\d{4,6}$/, "PIN must be 4–6 digits"),
   })
   .strict();
 
@@ -113,6 +120,53 @@ async function refreshHandler(req, res, next) {
   }
 }
 
+async function staffLoginHandler(req, res, next) {
+  try {
+    if (req.timedout) return;
+    const payload = staffLoginSchema.parse(req.body);
+    const data = await staffLogin({
+      phone: payload.phone,
+      pin: payload.pin,
+      userAgent: req.headers["user-agent"] || "",
+      ipAddress: req.ip || "",
+      requestId: req.requestId,
+    });
+    if (data.refreshToken) {
+      setRefreshTokenCookie(res, data.refreshToken);
+    }
+    return sendOk(res, data);
+  } catch (error) {
+    if (error.name === "ZodError") {
+      return sendError(res, {
+        statusCode: 400,
+        code: "VALIDATION_FAILED",
+        message: "Validation failed",
+        location: "controllers/authController.staffLoginHandler",
+        details: { requestId: req.requestId, errors: error.issues },
+      });
+    }
+    return next(error);
+  }
+}
+
+async function getSessionHandler(req, res, next) {
+  try {
+    const payload = await getSessionPayload(req.auth.userId);
+    if (!payload) {
+      return sendError(res, {
+        statusCode: 401,
+        code: "SESSION_INVALID",
+        message: "Session no longer valid",
+        location: "controllers/authController.getSessionHandler",
+        details: { requestId: req.requestId },
+      });
+    }
+    return sendOk(res, payload);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function logoutHandler(req, res, next) {
   try {
     if (req.timedout) return;
@@ -127,4 +181,11 @@ async function logoutHandler(req, res, next) {
   }
 }
 
-module.exports = { register, loginHandler, refreshHandler, logoutHandler };
+module.exports = {
+  register,
+  loginHandler,
+  staffLoginHandler,
+  getSessionHandler,
+  refreshHandler,
+  logoutHandler,
+};

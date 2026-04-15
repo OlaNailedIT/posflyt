@@ -28,6 +28,16 @@ model Business {
   usageMonthly   UsageMonthly[]
   users          User[]
   dailyCloses    DailyClose[]
+  saleReturns    SaleReturn[]
+  ledgerEntries  FinancialLedgerEntry[]
+  /// Phase 4 SoR: append-only ingested integrity events (distinct from FinancialLedgerEntry).
+  integrityLedgerEvents IntegrityLedgerEvent[]
+  integrityLedgerLines  IntegrityLedgerLine[]
+  /// Phase 5: derived materialized view of integrity state (events remain SoR).
+  integritySnapshots    IntegritySnapshot[]
+  staffInvites         StaffInvite[]
+  /// Append-only business accountability events (synced from client outbox; not UFEC financial ledger).
+  auditTrailEvents     AuditEvent[]
 }
 
 /// Phase 7.13.1: operational daily close log (not full accounting).
@@ -51,13 +61,15 @@ model DailyClose {
   @@index([closedAt(sort: Desc)])
 }
 
-/// Phase 7.10.2: simple business expenses (profit = sales − expenses; not stored as a column).
+/// Phase 7.10.2: simple business expenses; DPE uses expenseDate for calendar-day rolls (defaults to created day).
 model Expense {
   id         String   @id @default(cuid())
   businessId String
   amount     Float
   category   String
   note       String?
+  /// Calendar expense date (defaults to creation day); used for daily net profit vs business time zone.
+  expenseDate DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   requestId  String?  @unique
@@ -68,12 +80,15 @@ model Expense {
   @@unique([businessId, eventId])
   @@index([businessId])
   @@index([createdAt])
+  @@index([businessId, expenseDate])
 }
 
 model User {
   id            String          @id @default(uuid())
   name          String
   email         String          @unique
+  /// E.164-style digits only (e.g. 2348012345678); set for WhatsApp invite staff; login with phone + PIN.
+  phone         String?         @unique
   password      String
   role          Role            @default(CASHIER)
   createdAt     DateTime        @default(now())
@@ -84,6 +99,8 @@ model User {
   refreshTokens RefreshToken[]
   transactions  Transaction[]
   dailyCloses   DailyClose[]
+  saleReturns   SaleReturn[]
+  integrityLedgerEvents IntegrityLedgerEvent[]
   business      Business        @relation(fields: [businessId], references: [id])
 
   @@index([businessId])
@@ -111,8 +128,30 @@ model Store {
   products     Product[]
   business     Business      @relation(fields: [businessId], references: [id])
   transactions Transaction[]
+  staffInvites StaffInvite[]
 
   @@index([businessId])
+}
+
+/// One-time WhatsApp / link invite for staff to set PIN and create an account (no password email flow).
+model StaffInvite {
+  id         String   @id @default(uuid())
+  businessId String
+  /// Normalized phone digits (same format as User.phone).
+  phone      String
+  fullName   String
+  role       Role
+  token      String   @unique
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  storeId    String?
+  createdAt  DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  store    Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([businessId, phone])
 }
 
 model Product {
@@ -176,10 +215,29 @@ model Customer {
   @@index([businessId])
 }
 
+/// UFEC: Payment/totals below (`transactionType`, `amountPaid`, `balanceDue`) are persisted denormalization.
+/// Canonical financial state for UFEC flows is enforced in the ledger / event layer; DB CHECKs on these
+/// columns were removed (see neutralized migrations under `prisma/migrations/202604*` overrides).
 model Transaction {
   id            String            @id
-  /// Sale total (line items + tax); CHECK-aligned with amountPaid / balanceDue.
+  /// Sum of line totals before tax (legacy rows may be null; backfilled in migration).
+  subtotalAmount Float?
+  /// Tax portion of the sale (legacy backfilled as totalAmount - subtotal).
+  taxAmount     Float             @default(0)
+  /// SALE (default) or RETURN (manager flow; reverses stock).
+  transactionType TransactionType @default(SALE)
+  /// When transactionType is RETURN, links to the original sale.
+  originalTransactionId String?
+  originalTransaction   Transaction?  @relation("TransactionReturn", fields: [originalTransactionId], references: [id], onDelete: SetNull)
+  returnOf              Transaction[] @relation("TransactionReturn")
+  saleReturnOriginals   SaleReturn[]  @relation("SaleReturnOriginal")
+  saleReturnMirrors     SaleReturn[]  @relation("SaleReturnMirror")
+  /// Sale total (line items + tax); amountPaid/balanceDue are app-layer denormalization (no DB CHECKs; UFEC).
   totalAmount   Float
+  /// DPE: sum of line COGS at sale time (RETURN rows negative when restated from lines).
+  totalCogs      Float?
+  /// DPE: sum of line (revenue − COGS) on subtotal basis before operating expenses.
+  grossLineProfit Float?
   /// Phase 7.10.4: split tender lines; sum of amounts equals totalAmount when set. Legacy rows null.
   payments      Json?
   paymentMethod PaymentMethod
@@ -196,6 +254,8 @@ model Transaction {
   lastSettlementRequestId String?
   /// Offline / sync event deduplication (optional client-provided id).
   lastProcessedEventId    String?
+  /// SHA-256 hex of canonical sale body (same id → same hash; duplicate with mismatch → 409).
+  payloadHash               String?
   /// Phase 7.12.1: receipt PDF id (filename base in storage).
   receiptId          String? @unique
   /// Shareable URL (API public route or hosted PDF).
@@ -211,16 +271,159 @@ model Transaction {
   store         Store?            @relation(fields: [storeId], references: [id])
   user          User              @relation(fields: [userId], references: [id])
   items         TransactionItem[]
+  /// Phase 4 SoR ledger linkage (optional until sync completes).
+  integrityLedgerEvents IntegrityLedgerEvent[]
+  integrityLedgerLines  IntegrityLedgerLine[]
 
   @@unique([id, businessId], map: "Transaction_client_transaction_id_business_id_key")
   @@index([businessId])
   @@index([businessId, createdAt(sort: Desc)])
 }
 
+/// Financial-grade return orchestration (idempotent on clientReturnId; resumable state machine).
+model SaleReturn {
+  id                    String           @id @default(cuid())
+  businessId            String
+  userId                String
+  /// Idempotency key from client (same as mirror Transaction.id when completed).
+  clientReturnId        String
+  originalTransactionId String
+  state                 SaleReturnState    @default(RETURN_INITIATED)
+  /// Mirror RETURN transaction row (created last in pipeline).
+  returnTransactionId   String?          @unique
+  failureCode           String?
+  failureDetail         String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  business              Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user                  User             @relation(fields: [userId], references: [id])
+  originalTransaction   Transaction      @relation("SaleReturnOriginal", fields: [originalTransactionId], references: [id], onDelete: Restrict)
+  returnTransaction     Transaction?     @relation("SaleReturnMirror", fields: [returnTransactionId], references: [id], onDelete: SetNull)
+  lines                 SaleReturnLine[]
+  ledgerEntry           FinancialLedgerEntry?
+
+  @@unique([businessId, clientReturnId])
+  @@index([businessId, originalTransactionId])
+  @@index([businessId, state])
+}
+
+model SaleReturnLine {
+  id           String     @id @default(cuid())
+  saleReturnId String
+  productId    String
+  quantity     Float
+  saleReturn   SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+
+  @@index([saleReturnId])
+  @@index([productId])
+}
+
+/// Append-only financial corrections (returns). Source of truth for reversal amounts before mirror Transaction row.
+model FinancialLedgerEntry {
+  id                    String          @id @default(cuid())
+  businessId            String
+  kind                  LedgerEntryKind
+  saleReturnId          String          @unique
+  originalTransactionId String
+  subtotalAmount        Float
+  taxAmount             Float
+  totalAmount           Float
+  metadata              Json?
+  createdAt             DateTime        @default(now())
+
+  business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  saleReturn SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt(sort: Desc)])
+  @@index([originalTransactionId])
+}
+
+/// Phase 4 system-of-record: immutable append-only **ingested** events (reconcile / audit).
+/// Not to be confused with `FinancialLedgerEntry` (return-reversal ledger only).
+model IntegrityLedgerEvent {
+  /// Idempotency key from client (e.g. UUID); one row per successful ingest.
+  eventId             String      @id
+  businessId          String
+  /// Stable client execution id (often equals `Transaction.id` once synced).
+  clientTransactionId String
+  /// Populated when the canonical `Transaction` row exists.
+  transactionId       String?
+  /// Logical event type (e.g. SALE_APPLIED, OFFLINE_QUEUED).
+  type                String
+  payload             Json
+  payloadHash         String
+  source              LedgerIntegritySource
+  userId              String?
+  /// Client-supplied monotonic-ish time (ms) for deterministic replay ordering; falls back to createdAt when null.
+  clientTimestampMs   BigInt?
+  createdAt           DateTime    @default(now())
+
+  business     Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transaction  Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ledgerLines  IntegrityLedgerLine[]
+
+  @@index([businessId, clientTransactionId])
+  @@index([businessId, clientTransactionId, clientTimestampMs, eventId])
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+/// Phase 4 system-of-record: append-only **derived** ledger lines (projection; no in-place updates).
+model IntegrityLedgerLine {
+  ledgerLineId        String                 @id
+  businessId          String
+  clientTransactionId String
+  transactionId       String?
+  debit               Float
+  credit              Float
+  lineKind            IntegrityLedgerLineKind
+  /// Originating integrity event when applicable.
+  sourceEventId       String?
+  balanceAfter        Float
+  createdAt           DateTime               @default(now())
+
+  business    Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transaction Transaction?         @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  sourceEvent IntegrityLedgerEvent? @relation(fields: [sourceEventId], references: [eventId], onDelete: SetNull)
+
+  @@index([businessId, clientTransactionId])
+  @@index([businessId, transactionId])
+  @@index([sourceEventId])
+}
+
+/// Phase 5: checkpoint of replayed integrity financial state (cache only; rebuild from events anytime).
+model IntegritySnapshot {
+  id                  String   @id @default(cuid())
+  businessId          String
+  clientTransactionId String
+  /// Last IntegrityLedgerEvent.eventId included in this snapshot (inclusive of ordered replay).
+  lastEventId         String?
+  eventCount          Int      @default(0)
+  stateJson           Json
+  /// Denormalized runningNet / recognition total for filtering (see stateJson for full state).
+  balance             Float
+  ledgerHash          String
+  stateHash           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, clientTransactionId])
+  @@index([businessId, createdAt])
+}
+
 model TransactionItem {
   id            String      @id @default(uuid())
   quantity      Float
   price         Float
+  /// Product cost per sell unit at time of sale (kg/litre = per unit of measure).
+  unitCostAtSale Float       @default(0)
+  /// Line revenue before tax allocation (= abs(qty) * unit sell).
+  lineSubtotal   Float       @default(0)
+  lineCost       Float       @default(0)
+  lineProfit     Float       @default(0)
   transactionId String
   productId     String
   product       Product     @relation(fields: [productId], references: [id])
@@ -389,6 +592,31 @@ model AuditLog {
   @@index([businessId, createdAt(sort: Desc)])
 }
 
+/// Immutable business audit trail (human accountability). Insert-only via bulk ingest; id = client UUID for dedupe.
+model AuditEvent {
+  id             String   @id
+  businessId     String
+  type           String
+  actorId        String
+  deviceId       String
+  entityType     String
+  entityId       String
+  action         String
+  before         Json?
+  after          Json?
+  source         String
+  metadata       Json?
+  /// Links multiple audit rows to one business action (checkout session, return, etc.).
+  correlationId  String?
+  createdAt      DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt(sort: Desc)])
+  @@index([businessId, entityType, entityId])
+  @@index([businessId, correlationId])
+}
+
 model BackupRecord {
   id              String   @id @default(uuid())
   filePath        String
@@ -428,6 +656,43 @@ enum Role {
   ADMIN
   MANAGER
   CASHIER
+}
+
+enum TransactionType {
+  SALE
+  RETURN
+}
+
+/// Resumable POS return pipeline (no state skipping).
+enum SaleReturnState {
+  RETURN_INITIATED
+  RETURN_VALIDATED
+  LEDGER_RECORDED
+  INVENTORY_RESTORED
+  REFUND_PROCESSED
+  RETURN_COMPLETED
+  RETURN_FAILED_VALIDATION
+  RETURN_FAILED_LEDGER
+  RETURN_FAILED_INVENTORY
+  RETURN_FAILED_REFUND
+}
+
+enum LedgerEntryKind {
+  RETURN_REVERSAL
+}
+
+/// Phase 4 SoR: how the integrity event reached the server.
+enum LedgerIntegritySource {
+  ONLINE
+  OFFLINE
+  SYNC
+}
+
+/// Phase 4 SoR: ledger line classification (projection rows).
+enum IntegrityLedgerLineKind {
+  SALE
+  REFUND
+  ADJUSTMENT
 }
 
 enum PaymentMethod {

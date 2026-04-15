@@ -21,6 +21,11 @@ const {
   assertConsistentPaymentState,
 } = require("../utils/paymentState");
 const { recordLowStockAlertIfNeeded } = require("./lowStockAlertService");
+const {
+  validateTransactionInvariants,
+  evaluateInvariantResult,
+} = require("./financialInvariantService");
+const { logger } = require("../utils/logger");
 const { assertSaleQuantity } = require("../utils/productUnits");
 const { logUfecLedgerObservation } = require("../utils/ufecLedgerObservation");
 const { logLegacyAdapterZone } = require("../utils/ufecLegacyAdapterGuard");
@@ -559,6 +564,51 @@ async function createReturnTransaction(businessId, userId, body, requestId) {
                 lineC,
                 lineP,
               });
+            }
+
+            const returnInv = validateTransactionInvariants({
+              totalAmount: amounts.total,
+              amountPaid,
+              balanceDue,
+              splitPayments: null,
+              transactionType: "RETURN",
+              originalTransactionId: orig.id,
+            });
+            const returnInvDecision = evaluateInvariantResult(returnInv);
+            if (returnInvDecision.action === "BLOCK" || returnInvDecision.action === "FLAG") {
+              await logAudit({
+                businessId,
+                userId,
+                action: "TRANSACTION_INVARIANT_CHECK",
+                metadata: {
+                  level: returnInvDecision.level,
+                  action: returnInvDecision.action,
+                  blockCodes: returnInvDecision.blockCodes,
+                  flagCodes: returnInvDecision.flagCodes,
+                  transactionId: clientReturnId,
+                  kind: "RETURN_MIRROR",
+                },
+              });
+            }
+            if (returnInvDecision.action === "BLOCK") {
+              const err = new Error(
+                `Return blocked: ${returnInvDecision.blockCodes.join(", ") || "invariant violation"}`
+              );
+              err.statusCode = 400;
+              err.code = "TRANSACTION_INVARIANT_BLOCK";
+              err.location = location;
+              throw err;
+            }
+            if (returnInvDecision.action === "FLAG") {
+              logger.warn(
+                {
+                  event: "RETURN_INVARIANT_FLAG",
+                  businessId,
+                  clientReturnId,
+                  flagCodes: returnInvDecision.flagCodes,
+                },
+                "return mirror invariant flag"
+              );
             }
 
             await tx.transaction.create({

@@ -3,6 +3,11 @@ const { roundCurrency, computePaymentState } = require("./paymentState");
 /** Allowed methods for split tender (not CREDIT — credit is a sale mode, not a tender line). */
 const SPLIT_TENDER_TYPES = new Set(["CASH", "CARD", "TRANSFER", "MOBILE"]);
 
+function maxSoftSplitDrift(totalAmount) {
+  const t = roundCurrency(Number(totalAmount));
+  return Math.max(5, roundCurrency(t * 0.002));
+}
+
 /**
  * When `payload.payments` is present, validate split tender lines and return normalized rows.
  * Sum of amounts must equal `totalAmount` (rounded). Only full paid sales; no partial/credit.
@@ -55,14 +60,33 @@ function parseSplitPayments(payload, totalAmount, location) {
     normalized.push({ type, amount });
   }
 
-  const sum = roundCurrency(normalized.reduce((s, x) => s + x.amount, 0));
   const target = roundCurrency(Number(totalAmount));
-  if (Math.abs(sum - target) >= 0.005) {
-    const err = new Error("payments amounts must sum to the sale total");
-    err.statusCode = 400;
-    err.code = "PAYMENT_SPLIT_MISMATCH";
-    err.location = location;
-    throw err;
+  let sum = roundCurrency(normalized.reduce((s, x) => s + x.amount, 0));
+  let diff = Math.abs(sum - target);
+  let softDriftAdjusted = false;
+
+  if (diff < 0.005) {
+    // exact enough after rounding
+  } else {
+    const softMax = maxSoftSplitDrift(target);
+    if (diff <= softMax && normalized.length > 0) {
+      const last = normalized[normalized.length - 1];
+      const delta = roundCurrency(target - sum);
+      const nextLast = roundCurrency(last.amount + delta);
+      if (nextLast > 0) {
+        last.amount = nextLast;
+        sum = roundCurrency(normalized.reduce((s, x) => s + x.amount, 0));
+        diff = Math.abs(sum - target);
+        softDriftAdjusted = true;
+      }
+    }
+    if (diff >= 0.005) {
+      const err = new Error("payments amounts must sum to the sale total");
+      err.statusCode = 400;
+      err.code = "PAYMENT_SPLIT_MISMATCH";
+      err.location = location;
+      throw err;
+    }
   }
 
   const state = computePaymentState(target, sum);
@@ -74,7 +98,8 @@ function parseSplitPayments(payload, totalAmount, location) {
     amountPaid: state.amountPaid,
     balanceDue: state.balanceDue,
     paymentStatus: state.paymentStatus,
+    softDriftAdjusted,
   };
 }
 
-module.exports = { parseSplitPayments, SPLIT_TENDER_TYPES };
+module.exports = { parseSplitPayments, SPLIT_TENDER_TYPES, maxSoftSplitDrift };

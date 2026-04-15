@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const path = require("path");
 const fs = require("fs/promises");
 const prisma = require("../config/prisma");
@@ -36,7 +37,7 @@ async function createBackupForBusiness(businessId) {
   ]);
   const payload = {
     businessId,
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowISOString(),
     products,
     customers,
     transactions,

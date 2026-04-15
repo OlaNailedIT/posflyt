@@ -11,6 +11,7 @@ import { enqueueOutbox } from "../services/db";
 import { formatMoney } from "../utils/currency";
 import { useOfflineStore } from "../stores/offlineStore";
 import { useOfflineSync } from "../hooks/useOfflineSync";
+import { nowISOString } from "../utils/safeDate";
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
@@ -65,7 +66,7 @@ export default function CustomersPage() {
           id: editingId,
           payload: {
             ...form,
-            lastKnownUpdatedAt: baseline ? String(baseline) : new Date().toISOString(),
+            lastKnownUpdatedAt: baseline ? String(baseline) : nowISOString(),
           },
         });
         showToast("Customer updated.", "success");
@@ -92,7 +93,7 @@ export default function CustomersPage() {
         ? String(customer.updatedAt)
         : customer.createdAt
           ? String(customer.createdAt)
-          : new Date().toISOString()
+          : nowISOString()
     );
     setForm({
       name: customer.name || "",

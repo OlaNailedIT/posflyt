@@ -6,6 +6,7 @@ const prisma = require("../config/prisma");
 const { logger } = require("../utils/logger");
 const { isFeatureEnabled } = require("./featureFlagService");
 const { paymentStatusToApi, roundCurrency } = require("../utils/paymentState");
+const { toSafeISOString } = require("../utils/date.js");
 
 const RECEIPTS_SUBDIR = path.join("data", "receipts");
 
@@ -47,7 +48,7 @@ function buildReceiptPdfBuffer(receipt) {
     doc.moveDown();
     doc.fontSize(9).text(`Transaction: ${receipt.transaction?.id || ""}`, { align: "center" });
     doc.text(
-      `Date: ${receipt.transaction?.dateTime ? new Date(receipt.transaction.dateTime).toISOString() : ""}`,
+      `Date: ${receipt.transaction?.dateTime ? toSafeISOString(receipt.transaction.dateTime) ?? "" : ""}`,
       { align: "center" }
     );
     doc.fillColor("#000000");

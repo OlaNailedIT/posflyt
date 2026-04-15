@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const { slackBillingWebhookUrl } = require("../config/env");
 const { getSnapshot, listTransactionsDrilldown, buildSlackSummaryText } = require("../services/biService");
 const { getTransactionDetail } = require("../services/adminOpsService");
@@ -90,7 +91,7 @@ async function postSlackSummary(req, res, next) {
       });
     }
     const from = body.from || new Date(Date.now() - 30 * 86400000).toISOString();
-    const to = body.to || new Date().toISOString();
+    const to = body.to || nowISOString();
     const text = await buildSlackSummaryText(req.auth.businessId, { from, to, granularity: "day" });
     const r = await fetch(slackBillingWebhookUrl, {
       method: "POST",

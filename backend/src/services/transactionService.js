@@ -19,6 +19,7 @@ const { isFeatureEnabled } = require("./featureFlagService");
 const { ensureBusinessSubscription } = require("./subscriptionService");
 const { logger } = require("../utils/logger");
 const prisma = require("../config/prisma");
+const { toSafeISOString } = require("../utils/date.js");
 const {
   computePaymentState,
   roundCurrency,
@@ -26,6 +27,10 @@ const {
   assertConsistentPaymentState,
 } = require("../utils/paymentState");
 const { parseSplitPayments } = require("../utils/splitPayments");
+const {
+  validateTransactionInvariants,
+  evaluateInvariantResult,
+} = require("./financialInvariantService");
 const { isMeasuredProduct, unitPriceForSale, assertSaleQuantity } = require("../utils/productUnits");
 const { recordLowStockAlertIfNeeded } = require("./lowStockAlertService");
 const { attachReceiptArtifactsIfEnabled } = require("./receiptService");
@@ -56,6 +61,7 @@ function normalizeCreditFields(payload, totalAmount, location) {
       paymentMethod: split.paymentMethod,
       dueDate: null,
       splitPayments: split.payments,
+      softDriftAdjusted: Boolean(split.softDriftAdjusted),
     };
   }
 
@@ -138,6 +144,7 @@ function normalizeCreditFields(payload, totalAmount, location) {
     paymentMethod,
     dueDate,
     splitPayments: undefined,
+    softDriftAdjusted: false,
   };
 }
 
@@ -335,7 +342,7 @@ async function resolveRetryMetricIfNeeded({ businessId, userId, transactionId, s
     metadata: {
       transactionId,
       firstFailureAt: failed.createdAt,
-      successAt: new Date(successAt).toISOString(),
+      successAt: toSafeISOString(successAt),
       resolutionMs,
     },
   });
@@ -362,6 +369,7 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
     throw error;
   }
 
+  /** Sync idempotency: same `client_transaction_id` + business replays; `payload_hash` gates conflicting bodies. */
   const existingForBusiness = await tx.transaction.findUnique({
     where: {
       id_businessId: {
@@ -530,6 +538,56 @@ async function processSingleTransaction(tx, businessId, userId, payload, options
 
   const credit = normalizeCreditFields(payload, total, location);
   assertConsistentPaymentState(total, credit.amountPaid, credit.balanceDue);
+
+  const invariantSnapshot = validateTransactionInvariants({
+    totalAmount: total,
+    amountPaid: credit.amountPaid,
+    balanceDue: credit.balanceDue,
+    splitPayments: credit.splitPayments,
+    softDriftAdjusted: credit.softDriftAdjusted,
+    transactionType: "SALE",
+  });
+  const invariantDecision = evaluateInvariantResult(invariantSnapshot);
+  if (invariantDecision.action === "BLOCK" || invariantDecision.action === "FLAG") {
+    await logAudit({
+      businessId,
+      userId,
+      action: "TRANSACTION_INVARIANT_CHECK",
+      metadata: {
+        level: invariantDecision.level,
+        action: invariantDecision.action,
+        blockCodes: invariantDecision.blockCodes,
+        flagCodes: invariantDecision.flagCodes,
+        transactionId,
+        clientTransactionId: transactionId,
+      },
+    });
+  }
+  if (invariantDecision.action === "BLOCK") {
+    const err = new Error(
+      `Transaction blocked: ${invariantDecision.blockCodes.join(", ") || "invariant violation"}`
+    );
+    err.statusCode = 400;
+    err.code = "TRANSACTION_INVARIANT_BLOCK";
+    err.location = location;
+    err.details = {
+      blockCodes: invariantDecision.blockCodes,
+      flagCodes: invariantDecision.flagCodes,
+    };
+    throw err;
+  }
+  if (invariantDecision.action === "FLAG") {
+    logger.warn(
+      {
+        event: "TRANSACTION_INVARIANT_FLAG",
+        businessId,
+        clientTransactionId: transactionId,
+        level: invariantDecision.level,
+        flagCodes: invariantDecision.flagCodes,
+      },
+      "sale transaction invariant flag"
+    );
+  }
 
   const now = new Date();
   await tx.transaction.create({
@@ -776,9 +834,11 @@ async function createTransactionsBulk(businessId, userId, transactions, options 
             ? "IDEMPOTENCY_PAYLOAD_MISMATCH"
             : error.code === "INCONSISTENT_PAYMENT_STATE"
               ? "INCONSISTENT_PAYMENT_STATE"
-              : error.code === "PAYMENT_SPLIT_MISMATCH"
-                ? "PAYMENT_SPLIT_MISMATCH"
-                : error.code === "INVALID_ITEM_QUANTITY"
+              : error.code === "TRANSACTION_INVARIANT_BLOCK"
+                ? "TRANSACTION_INVARIANT_BLOCK"
+                : error.code === "PAYMENT_SPLIT_MISMATCH"
+                  ? "PAYMENT_SPLIT_MISMATCH"
+                  : error.code === "INVALID_ITEM_QUANTITY"
                   ? "INVALID_ITEM_QUANTITY"
                   : error.statusCode === 400
                     ? error.code || "VALIDATION_FAILED"

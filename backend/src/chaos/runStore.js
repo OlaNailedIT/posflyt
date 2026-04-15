@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const { randomUUID } = require("crypto");
 
 const MAX = 50;
@@ -6,7 +7,7 @@ const runs = new Map();
 
 function saveRun(report) {
   const id = report.runId || randomUUID();
-  const enriched = { ...report, runId: id, storedAt: new Date().toISOString() };
+  const enriched = { ...report, runId: id, storedAt: nowISOString() };
   runs.set(id, enriched);
   while (runs.size > MAX) {
     const first = runs.keys().next().value;

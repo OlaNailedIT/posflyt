@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { normalizeNullableIso } from "../utils/safeDate.js";
 
 export const useOfflineStore = create((set) => ({
   isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
@@ -35,7 +36,10 @@ export const useOfflineStore = create((set) => ({
     }),
   setFailedCount: (failedTransactions) => set({ failedTransactions }),
   setQueueMeta: ({ queueLastAttemptAt, queueNextRetryAt }) =>
-    set({ queueLastAttemptAt, queueNextRetryAt }),
+    set({
+      queueLastAttemptAt: normalizeNullableIso(queueLastAttemptAt),
+      queueNextRetryAt: normalizeNullableIso(queueNextRetryAt),
+    }),
   setSyncing: (syncing) => set({ syncing }),
   setSyncProgress: (syncProgress) => set({ syncProgress }),
   setSyncSession: (syncSession) => set({ syncSession }),
@@ -48,7 +52,13 @@ export const useOfflineStore = create((set) => ({
     })),
   clearSyncSession: () =>
     set({ syncSession: { startedAt: null, total: 0, completed: 0 } }),
-  setLastSuccessfulSyncAt: (lastSuccessfulSyncAt) => set({ lastSuccessfulSyncAt }),
-  setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt }),
+  setLastSuccessfulSyncAt: (lastSuccessfulSyncAt) =>
+    set({
+      lastSuccessfulSyncAt:
+        typeof lastSuccessfulSyncAt === "number" && Number.isFinite(lastSuccessfulSyncAt)
+          ? lastSuccessfulSyncAt
+          : null,
+    }),
+  setLastSyncedAt: (lastSyncedAt) => set({ lastSyncedAt: normalizeNullableIso(lastSyncedAt) }),
   setLastSyncError: (lastSyncError, lastSyncCode = null) => set({ lastSyncError, lastSyncCode }),
 }));

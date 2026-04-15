@@ -1,4 +1,5 @@
 import { enqueueOutbox } from "../services/db";
+import { nowISOString } from "../utils/safeDate.js";
 import { getOrCreateDeviceId } from "../offline/deviceCrypto";
 import { useAuthStore } from "../stores/authStore";
 import { createCorrelationId } from "./auditCorrelation";
@@ -67,7 +68,7 @@ export async function writeAuditEvent(partial) {
         ...(partial.metadata && typeof partial.metadata === "object" ? partial.metadata : {}),
         actorName: user.name,
         role: user.role,
-        timestamp: new Date().toISOString(),
+        timestamp: nowISOString(),
       },
     };
     if (correlationId != null) {

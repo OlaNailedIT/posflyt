@@ -43,8 +43,10 @@ const { metricsTracker } = require("./middlewares/metricsTracker");
 const { errorHandler, notFound } = require("./middlewares/errorHandler");
 const { logger } = require("./utils/logger");
 const { getPrometheusMetrics } = require("./controllers/metricsController");
+const responseDateSanitizer = require("./middlewares/responseDateSanitizer");
 
 const app = express();
+app.use(responseDateSanitizer);
 
 if (trustProxy !== false) {
   app.set("trust proxy", trustProxy);
@@ -186,9 +188,11 @@ app.use("/api/v1", chaosRoutes);
 app.use("/api/v1", distributedRoutes);
 
 /**
- * Controlled `/api/*` aliases — base-path compatibility when `VITE_API_URL` is `https://host/api`
- * (requests become `/api/products`, not `/products`). Do not duplicate `/api/v1/*`, `/api/admin`, `/api/bi`.
- * Prefer setting the client base URL to `https://host` with paths as in `src/services/api.js`.
+ * ===== API COMPATIBILITY LAYER =====
+ * When `VITE_API_URL` is `https://host/api`, relative paths like `/customers` become `/api/customers`.
+ * Mount the same routers here as root mounts (no duplicate handlers); routers define paths without `/api`.
+ * Do NOT mirror: `/api/v1/*`, `/api/admin` (ops), `/api/bi` — those already include the prefix in the request path.
+ * Prefer `VITE_API_URL` = origin only (`https://host`); this layer is for env drift safety.
  */
 app.use("/api/auth", authLimiter);
 app.use("/api/auth", authRoutes);
@@ -198,9 +202,20 @@ app.use("/api/transactions", transactionRoutes);
 app.use("/api", customerRoutes);
 app.use("/api", settingsRoutes);
 app.use("/api", expenseRoutes);
-/** `/dashboard-stats`, `/analytics/daily-summary` — shell loads these without `/api` in the path string. */
 app.use("/api", dashboardRoutes);
-/** `/audit-events/bulk`, `/audit-logs` — offline sync audit ingest when `VITE_API_URL` ends with `/api`. */
+app.use("/api", adminRoutes);
+app.use("/api", reportRoutes);
+app.use("/api", exportRoutes);
+app.use("/api", onboardingRoutes);
+app.use("/api", analyticsRoutes);
+app.use("/api", billingRoutes);
+app.use("/api", backupRoutes);
+app.use("/api", sessionRoutes);
+app.use("/api", supportRoutes);
+app.use("/api", staffRoutes);
+app.use("/api", usageRoutes);
+app.use("/api", marketingRoutes);
+app.use("/api", systemRoutes);
 app.use("/api", auditRoutes);
 
 app.use(notFound);

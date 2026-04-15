@@ -1,3 +1,4 @@
+const { nowISOString } = require("../../utils/date.js");
 /**
  * Phase 6 — full transaction explainability for a client transaction scope.
  */
@@ -112,14 +113,14 @@ async function explainTransactionScope(prisma, businessId, clientTransactionId) 
       summary: reconciliation.summary,
       fingerprint: reconciliation.fingerprint,
       severityScore: reconciliation.severityScore,
-      lastCheckedAt: new Date().toISOString(),
+      lastCheckedAt: nowISOString(),
     },
     terminalState: {
       status: s.status,
       runningNet: s.runningNet,
       balance: s.balance,
     },
-    generatedAt: new Date().toISOString(),
+    generatedAt: nowISOString(),
   };
 }
 

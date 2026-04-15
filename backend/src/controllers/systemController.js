@@ -1,3 +1,4 @@
+const { nowISOString, toDateKeyUTC } = require("../utils/date.js");
 const prisma = require("../config/prisma");
 const { getRuntimeMetrics } = require("../services/runtimeMetricsService");
 const { getInventoryIntegrityStatus } = require("../services/inventoryIntegrityService");
@@ -13,7 +14,7 @@ async function getSystemHealth(_req, res) {
   return sendOk(res, {
     api: "up",
     database: db,
-    timestamp: new Date().toISOString(),
+    timestamp: nowISOString(),
   });
 }
 
@@ -110,12 +111,13 @@ async function getReliabilitySummary(req, res, next) {
       : null;
     const trendMap = new Map();
     for (let i = 0; i < 7; i += 1) {
-      const day = new Date(Date.now() - i * 1000 * 60 * 60 * 24).toISOString().slice(0, 10);
+      const day = toDateKeyUTC(Date.now() - i * 1000 * 60 * 60 * 24);
+      if (!day) continue;
       trendMap.set(day, { date: day, warningCount: 0, criticalCount: 0 });
     }
     for (const log of mismatchLogs7d) {
-      const day = new Date(log.createdAt).toISOString().slice(0, 10);
-      if (!trendMap.has(day)) continue;
+      const day = toDateKeyUTC(log.createdAt);
+      if (!day || !trendMap.has(day)) continue;
       const row = trendMap.get(day);
       if (log.action === "INVENTORY_MISMATCH_WARNING") row.warningCount += 1;
       if (log.action === "INVENTORY_MISMATCH_CRITICAL") row.criticalCount += 1;
@@ -156,7 +158,7 @@ async function getReliabilitySummary(req, res, next) {
       lastFullReconciliationRunAt: integrity.lastFullRunAt,
       lastReconciliationStatus: integrity.lastRunStatus,
       lastReconciliationError: integrity.lastRunError,
-      lastUpdatedAt: new Date().toISOString(),
+      lastUpdatedAt: nowISOString(),
     });
   } catch (error) {
     return next(error);

@@ -1,3 +1,4 @@
+const { nowISOString, toSafeISOString } = require("../utils/date.js");
 /**
  * Phase 7 — chaos control plane (explicitly env-gated; admin-only).
  */
@@ -54,8 +55,8 @@ async function postChaosRun(req, res, next) {
       businessId,
       scenario: body.scenario,
       intensity: body.intensity || "MEDIUM",
-      startedAt: new Date(startedAt).toISOString(),
-      finishedAt: new Date().toISOString(),
+      startedAt: toSafeISOString(startedAt) ?? nowISOString(),
+      finishedAt: nowISOString(),
       durationMs: Date.now() - startedAt,
       metrics,
       resilienceScore: score,

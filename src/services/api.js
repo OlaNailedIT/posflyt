@@ -6,6 +6,7 @@ import { useConflictStore } from "../stores/conflictStore";
 import { useToastStore } from "../stores/toastStore";
 import { getStoredAuthTokenSync } from "../utils/authToken";
 import { showFriendlyErrorToast } from "../utils/friendlyApiError";
+import { normalizeApiDateFieldsDeep } from "../utils/safeDate.js";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -92,6 +93,19 @@ api.interceptors.response.use(
     const rid = response.data?.requestId;
     if (rid != null) {
       response.requestId = rid;
+    }
+    const ct = String(response.headers?.["content-type"] || "");
+    const body = response.data;
+    if (
+      body != null &&
+      typeof body === "object" &&
+      !(body instanceof Blob) &&
+      !(body instanceof ArrayBuffer) &&
+      !ct.includes("text/csv") &&
+      !ct.includes("application/pdf") &&
+      !ct.includes("application/octet-stream")
+    ) {
+      normalizeApiDateFieldsDeep(body);
     }
     return response;
   },

@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const prisma = require("../config/prisma");
 const { logAudit } = require("./auditService");
 const { logger } = require("../utils/logger");
@@ -131,7 +132,7 @@ async function logSessionEvent(businessId, userId, payload) {
       businessId,
       sessionId,
       userId,
-      timestamp: new Date().toISOString(),
+      timestamp: nowISOString(),
     },
     "inventory count session event"
   );

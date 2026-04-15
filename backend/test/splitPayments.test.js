@@ -50,6 +50,25 @@ test("parseSplitPayments rejects mismatch", () => {
   );
 });
 
+test("parseSplitPayments soft-adjusts minor split drift and flags", () => {
+  const out = parseSplitPayments(
+    {
+      payments: [
+        { type: "CASH", amount: 2500 },
+        { type: "TRANSFER", amount: 2499 },
+      ],
+      payment_status: "paid",
+    },
+    5000,
+    "t"
+  );
+  assert.equal(out.softDriftAdjusted, true);
+  assert.equal(out.amountPaid, 5000);
+  assert.equal(out.balanceDue, 0);
+  const sum = out.payments.reduce((s, p) => s + p.amount, 0);
+  assert.ok(Math.abs(sum - 5000) < 0.01);
+});
+
 test("parseSplitPayments rejects partial sale", () => {
   assert.throws(
     () =>

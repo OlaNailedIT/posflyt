@@ -1,3 +1,4 @@
+const { nowISOString } = require("../utils/date.js");
 const prisma = require("../config/prisma");
 const { nodeEnv } = require("../config/env");
 const { logAudit } = require("./auditService");
@@ -218,8 +219,8 @@ async function runReconciliation(runType, runner) {
   try {
     await runner();
     runtimeStatus.lastRunStatus = "ok";
-    if (runType === "incremental") runtimeStatus.lastIncrementalRunAt = new Date().toISOString();
-    if (runType === "full") runtimeStatus.lastFullRunAt = new Date().toISOString();
+    if (runType === "incremental") runtimeStatus.lastIncrementalRunAt = nowISOString();
+    if (runType === "full") runtimeStatus.lastFullRunAt = nowISOString();
   } catch (error) {
     runtimeStatus.lastRunStatus = "error";
     runtimeStatus.lastRunError = error.message || "Unknown reconciliation error";
